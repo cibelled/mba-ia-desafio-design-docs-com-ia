@@ -24,7 +24,7 @@ Com outbox, worker e retry, um evento pode ser enviado mais de uma vez. Isso aco
 | Alternativa | Por que foi descartada |
 |---|---|
 | **Exactly-once** | Exige coordenação dos dois lados e fica muito mais complexo. At-least-once com `event_id` resolve quase todos os casos e é o que Stripe e GitHub fazem ([09:25] Diego). |
-| **At-most-once** (enviar uma vez, sem retry) | Alternativa plausível, mas incompatível com a política de retry do [ADR-003](ADR-003-retry-backoff-exponencial-e-dlq.md). Clientes fora do ar perderiam eventos, e o retry existe justamente para cobrir indisponibilidade ([09:14] Larissa, [09:15] Diego). |
+| **At-most-once** (enviar uma vez, sem retry) | *Alternativa não discutida na reunião; incluída por ser plausível.* É incompatível com a política de retry do [ADR-003](ADR-003-retry-backoff-exponencial-e-dlq.md): clientes fora do ar perderiam eventos, e o retry existe justamente para cobrir indisponibilidade. |
 
 ## Consequências
 

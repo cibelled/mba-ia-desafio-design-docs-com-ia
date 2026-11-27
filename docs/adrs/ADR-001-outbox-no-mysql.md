@@ -39,7 +39,7 @@ Adotar o **padrão Transactional Outbox no MySQL já usado pela aplicação** ([
 | Alternativa | Por que foi descartada |
 |---|---|
 | **Disparo síncrono no `changeStatus`** | Prende a transação a I/O externo. Um cliente lento trava mudanças de status de outros pedidos, e um cliente fora do ar exigiria rollback de uma mudança de negócio legítima ([09:04] Bruno; [09:06] Diego: "Síncrono está fora de questão"). |
-| **Redis Streams / Redis Cluster** | Exige subir e operar infraestrutura nova. Para um time pequeno, é overengineering ([09:07] Larissa, [09:07] Diego). Também não resolve sozinho a atomicidade com a transação MySQL. |
+| **Redis Streams / Redis Cluster** | Exige subir e operar infraestrutura nova. Para um time pequeno, é overengineering ([09:07] Larissa, [09:07] Diego). |
 
 ## Consequências
 

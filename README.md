@@ -13,6 +13,7 @@ O ponto central não era "gerar documentos", e sim **filtrar**. A reunião tem d
 | Ferramenta | Papel |
 |---|---|
 | **Claude (Opus 5.5 e, no final, Sonnet 5.5) no Claude Code, em modo agente** | Ferramenta única de produção. Clonou o repositório base, leu a transcrição e o código (`order.service.ts`, `order.status.ts`, `schema.prisma`, middlewares, erros, logger, rotas, testes), escreveu ADRs, RFC, FDD, PRD, tracker e README, e fez a revisão de cada documento contra a transcrição. Também aplicou os arquivos no meu clone local e fez o commit |
+| **Dois subagentes revisores do Claude Code** | Revisão independente, sem editar arquivos. Um **revisor adversarial** leu transcrição, código e todos os documentos procurando contradições, itens inventados e erros técnicos. Um **classificador** leu só a transcrição, sem ver os documentos, e eu comparei o resultado dele com o que tinha escrito |
 | **Script Python de validação** (escrito pelo Claude durante a sessão) | Checagem anti-alucinação: confere se cada `[hh:mm] Falante` citado existe na transcrição, se cada caminho de código existe no repositório (ou está marcado como `(novo)`), se todos os IDs dos documentos estão no tracker e se a proporção TRANSCRICAO/CODIGO atende aos critérios. O script gera o `TRACKER.md` a partir de uma lista estruturada |
 
 ## Workflow adotado
@@ -25,9 +26,10 @@ Eu entreguei ao Claude o enunciado completo e pedi que ele produzisse o pacote i
 4. **FDD**, com modelo de dados Prisma, fluxos, contratos HTTP com exemplos, matriz `WEBHOOK_*`, resiliência, observabilidade e a seção de integração arquivo por arquivo.
 5. **PRD por último**, como consolidação de produto, sem repetir o detalhe técnico do FDD.
 6. **Tracker** gerado por script a partir de uma lista (ID, documento, tipo, resumo, fonte, localização), com validação automática.
-7. **Revisão e correções** a partir do validador e de uma releitura contra a transcrição (ver abaixo).
+7. **Revisão e correções** a partir do validador e de uma releitura contra a transcrição.
+8. **Revisão independente** com dois subagentes (um adversarial, um classificador), seguida de uma nova rodada de correções (ver abaixo).
 
-Para evitar conteúdo duplicado, a regra foi: o **RFC** fala em decisão, o **FDD** em implementação, o **PRD** em produto (sem nomes de tabela nem headers) e cada **ADR** traz uma decisão. Detalhe técnico que aparecia no PRD ou no RFC virava um link para o FDD.
+Para evitar conteúdo duplicado, a regra foi: o **RFC** fala em decisão, o **FDD** em implementação, o **PRD** em produto (sem nomes de tabela, de arquivo nem de ferramenta de teste) e cada **ADR** traz uma decisão. Detalhe técnico que aparecia no PRD ou no RFC virava um link para o FDD.
 
 ## Prompts customizados
 
@@ -57,8 +59,10 @@ Escreva docs/adrs/ADR-003-retry-backoff-exponencial-e-dlq.md no formato MADR com
 Status, Contexto, Decisão, Alternativas Consideradas, Consequências (positivas e negativas).
 Restrições:
 - Toda frase factual termina com a origem: ([hh:mm] Falante) ou o caminho do arquivo.
-- Alternativas: só as que aparecem na transcrição (retry indefinido, 3 tentativas,
-  "failed" na própria outbox). Para cada uma, o trade-off que motivou o descarte.
+- Alternativas: priorize as que aparecem na transcrição (retry indefinido, 3 tentativas,
+  "failed" na própria outbox). Se incluir uma alternativa plausível que NÃO foi discutida,
+  rotule como "não discutida na reunião" e não cite timestamp para ela. Para cada uma,
+  o trade-off que motivou o descarte.
 - Não invente números. Se algum número da reunião for inconsistente (ex.: "5 tentativas"
   com 5 intervalos somando ~14h36 = "quase 15 horas"), explicite a leitura adotada e
   marque como ponto de confirmação no RFC em vez de escolher em silêncio.
@@ -68,17 +72,37 @@ Restrições:
 
 ## Iterações e ajustes
 
-O pacote foi gerado em uma primeira passada e depois passou por **4 rodadas de correção**. Os ajustes concretos:
+O pacote passou por **5 rodadas**: a geração inicial, 3 rodadas de correção feitas por mim e uma rodada final de **revisão independente** por dois subagentes, que gerou 22 achados e mais de uma dezena de correções. Os ajustes concretos:
 
-1. **Atribuições inventadas no PRD.** Os cenários de uso citavam clientes pelo nome ("a Nova Cargo fica 2h fora do ar", "a MaxDistribuição vaza a secret"). A transcrição só diz "já tinha cliente nosso" com esses problemas ([09:16] e [09:22] Diego), sem nomear ninguém. Troquei por "um cliente".
-2. **Números sem origem no FDD.** A primeira versão trazia um truncamento de `responseBody` em 2KB e um lote padrão de 20 eventos como se fossem fatos. Nenhum dos dois tinha "Localização" na transcrição. O truncamento foi removido e virou ponto de atenção no risco FDD-RSK-07. O lote ficou como "padrão sugerido, a validar", ancorado no "batch pequeno" de [09:08] Diego.
-3. **Caminho de arquivo inexistente.** O validador acusou `src/worker.ts` citado no RFC e no FDD sem a marcação `(novo)`, o que violaria o critério "nenhum arquivo mencionado é inexistente". Todas as menções a arquivos que ainda serão criados passaram a levar `(novo)`.
-4. **Formato do ADR.** Os ADRs começaram com o Status como item de uma lista de metadados. Para atender ao critério de ter a *seção* Status, converti para um `## Status` em todos.
-5. **Questão em aberto descoberta no meio do caminho.** Ao escrever o FDD, percebi que só existe o endpoint de replay da DLQ, sem listagem para o ADMIN descobrir o `:id`. Acrescentei **RFC-QA-10** em vez de inventar um endpoint.
-6. **Convenção de nome de ADR.** `docs/adrs/README.md` sugeria `0001-titulo.md`, e o enunciado exige `ADR-NNN-titulo.md`. Segui o enunciado e transformei o README da pasta em índice.
-7. **Revisão final contra os critérios de aceite.** Pedi ao Claude que validasse o pacote inteiro contra o enunciado. Ele apontou três problemas, que foram corrigidos. (a) O FDD listava webhooks com `GET /webhooks?customerId=…`, só que a query não é nenhuma das opções faladas em [09:32] ("body ou path"). A rota virou `GET /customers/:customerId/webhooks`. (b) O RFC-QA-06 ignorava a fala "total 5 tentativas" do resumo de [09:48], que contradiz a leitura de 6 envios. O conflito passou a constar no RFC, no ADR-003, no FDD e no PRD. (c) Só um endpoint tinha exemplo completo de request e response. Todos ganharam bloco `http` com método, caminho e headers, e o PATCH ganhou a resposta em JSON. A data inventada no RFC também saiu.
+**Rodadas 1 a 3 (autocorreção)**
 
-Dois pontos da transcrição foram tratados desde a primeira versão, sem retrabalho, mas valem registro porque são onde a IA mais poderia errar: o `customer_id` (o Marcos diz que vem do JWT em [09:31] e a Larissa corrige em [09:32]; a escolha entre body e path ficou como **RFC-QA-05**) e a conta das "5 tentativas" (os 5 intervalos somam ~14h36, o que só fecha com "quase 15 horas" se for 1 envio + 5 retentativas; ficou como **RFC-QA-06**).
+1. **Atribuições inventadas no PRD.** Os cenários de uso citavam clientes pelo nome ("a Nova Cargo fica 2h fora do ar", "a MaxDistribuição vaza a secret"). A transcrição só diz "já tinha cliente nosso" ([09:16] e [09:22] Diego). Troquei por "um cliente".
+2. **Números sem origem no FDD.** A primeira versão trazia truncamento de `responseBody` em 2KB e lote padrão de 20 como se fossem fatos. O truncamento foi removido. O lote ficou como sugestão a validar.
+3. **Caminho de arquivo inexistente.** O validador acusou `src/worker.ts` sem a marcação `(novo)`, o que violaria o critério "nenhum arquivo mencionado é inexistente".
+4. **Formato do ADR.** Os ADRs começaram com o Status como item de uma lista de metadados. Converti para uma seção `## Status` em todos.
+5. **Questão em aberto descoberta no FDD.** Só existe o endpoint de replay da DLQ, sem listagem para o ADMIN achar o `:id`. Acrescentei RFC-QA-10 em vez de inventar um endpoint.
+6. **Convenção de nome de ADR.** `docs/adrs/README.md` sugeria `0001-titulo.md`, e o enunciado exige `ADR-NNN-titulo.md`. Segui o enunciado.
+
+**Rodada 4 (revisão independente)**
+
+Um revisor adversarial (somente leitura) e um classificador que só lia a transcrição. Os problemas mais importantes e o que mudou:
+
+7. **Bug de validação de URL (alta).** O schema Zod do FDD fazia `new URL()` dentro de um `refine`. No Zod 3, o `refine` roda mesmo quando `.url()` falha, e uma URL malformada lançaria `TypeError`, que o `validate.middleware.ts` não captura, virando 500 em vez de 400. Reproduzi o erro rodando o Zod e troquei por `superRefine` com `try/catch`.
+8. **Worker sequencial reintroduzia o problema da reunião (alta).** O FDD processava o lote em série, e um cliente lento seguraria o ciclo de todos, que é o argumento de [09:04] Bruno contra o envio síncrono. O FDD agora agrupa por endpoint, com uma cadeia independente por endpoint e um único processo. Ficou como questão em aberto RFC-QA-11, com risco e critério de aceite próprios.
+9. **"5 tentativas" tratado como decidido em alguns documentos e como pendente em outros (alta).** O ADR-003 e o PRD diziam "5 retentativas", enquanto o RFC-QA-06 admitia a dúvida. Padronizei: todos citam "5 tentativas" e remetem à leitura em confirmação.
+10. **Afirmação de ordem que o próprio design quebrava (média).** O FDD dizia que o processamento "preserva a ordem por order_id", mas um evento em retry deixa o seguinte ultrapassar. Reescrevi o trecho e deixei a limitação explícita em RFC-QA-07.
+11. **`DELETE` com cascade descartava eventos em silêncio (média).** Agora os eventos pendentes são movidos para a DLQ antes de apagar o endpoint.
+12. **Recuperação e shutdown do worker (média).** O FDD só recuperava `PROCESSING` no boot e prometia um shutdown que o `server.ts` atual não faz. Acrescentei tratamento de erro por evento e documentei o shutdown como comportamento novo.
+13. **Mudança de assinatura sem origem (média).** O FDD propunha passar `requestId` para `changeStatus`, alterando `order.controller.ts` e `order.service.ts` além do previsto. Removi a proposta.
+14. **Autorização das rotas de rotação e histórico (média).** A reunião liberou só o CRUD a qualquer role. `rotate-secret` e `deliveries` não foram discutidas e hoje permitem acesso aos dados de qualquer customer. Registrei no FDD §6.10 e nas questões RFC-QA-04 e RFC-QA-08 para a revisão da Sofia.
+15. **Citações que não sustentavam o item no tracker (média).** Vários códigos de erro `WEBHOOK_*` apontavam para falas que não os mencionam. Corrigi as localizações e marquei como "(derivado)" os itens que são deduções do documento. O cabeçalho do tracker passou a informar essa contagem.
+16. **Valores sem origem (média).** Criei a tabela do FDD §8.1, com todas as propostas que não vieram de uma fala (lote de 20, prefixo `sha256=`, códigos 202/409/422, `limit` de 100, tabela `webhook_deliveries`, nome do arquivo do worker, entre outras).
+17. **Alternativas não discutidas com timestamp (média).** Dois ADRs citavam falas de reunião para sustentar alternativas que ninguém discutiu. Removi as citações e rotulei as alternativas como "não discutidas".
+18. **Itens menores.** Tirei do RFC a data de hoje (a transcrição não informa a data da reunião), troquei o domínio de um cliente real por `example.com`, unifiquei `previousSecretExpiresAt`, registrei que "os últimos 100" foi só um exemplo do Marcos, tirei detalhes técnicos do PRD, registrei no ADR-007 que Marcos e Sofia já tinham saído da call quando UUID e snapshot foram decididos, e acrescentei o risco da estimativa de sprints (a soma das partes passa de 3).
+
+O classificador independente concordou com os documentos em decisões, descartes e adiamentos, e ajudou a pegar os pontos 16 e 18.
+
+**Ponto que eu rejeitei.** Pensei em tornar o worker paralelo entre pedidos. Não fiz, porque a reunião decidiu um único worker ([09:12] e [09:13]). A solução adotada mantém um único processo e só isola endpoints dentro dele.
 
 ## Como navegar a entrega
 

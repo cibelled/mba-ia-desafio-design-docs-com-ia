@@ -1,7 +1,7 @@
 # ADR-007 — Payload renderizado (snapshot) na inserção da outbox, em formato enxuto
 
 - **Data da decisão:** fim da reunião técnica de quinta-feira ([09:52] Bruno: "Beleza, snapshot. Decidido.")
-- **Decisores:** Larissa, Diego, Bruno
+- **Decisores:** Larissa, Diego, Bruno. Marcos e Sofia já tinham saído da call ([09:50]), então esta decisão e a de UUID ([09:51] Larissa) não passaram por eles.
 - **Relacionados:** [ADR-001](ADR-001-outbox-no-mysql.md), [ADR-005](ADR-005-at-least-once-com-x-event-id.md)
 
 ## Status

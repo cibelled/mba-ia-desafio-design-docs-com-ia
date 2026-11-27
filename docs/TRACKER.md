@@ -1,8 +1,10 @@
 # TRACKER — Rastreabilidade da documentação
 
-Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcrição da reunião (`TRANSCRICAO.md`, no formato `[hh:mm] Falante`) ou o código-fonte (caminho do arquivo). Os IDs correspondem aos que aparecem nos próprios documentos. Linhas com sufixo (`b`, `c`, `-D2`…) desdobram um item com mais de uma origem relevante.
+Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcrição da reunião (`TRANSCRICAO.md`, no formato `[hh:mm] Falante`) ou o código-fonte (caminho do arquivo). Os IDs com numeração dos documentos (ex.: `PRD-FR-01`, `FDD-ERR-03`) aparecem nos próprios documentos. Os demais (ex.: `FDD-MODEL-*`, `RFC-CTX-*`, `FDD-DEP-*`, `PRD-TST-*`) são rótulos do tracker para itens do documento indicado. Linhas com sufixo (`b`, `c`, `-D2`…) desdobram um item com mais de uma origem.
 
-**Totais:** 264 linhas · 224 com Fonte = TRANSCRICAO (85%) · 40 com Fonte = CODIGO.
+**Totais:** 267 linhas · 228 com Fonte = TRANSCRICAO (85%) · 39 com Fonte = CODIGO.
+
+**Itens derivados:** 21 linhas têm Tipo marcado como "(derivado)" ou "Proposta". Nelas, a Localização aponta a fala ou o arquivo **mais próximo** que motivou o item; o item em si é uma dedução ou proposta do documento, não uma decisão da reunião. Os valores sem origem direta estão listados no FDD §8.1.
 
 | ID | Documento | Tipo | Conteúdo (resumo) | Fonte | Localização |
 |---|---|---|---|---|---|
@@ -81,13 +83,10 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | RFC-QA-04 | `docs/RFC.md` | Questão em aberto | Endurecer autorização do CRUD mais pra frente | TRANSCRICAO | [09:37] Sofia |
 | RFC-QA-05 | `docs/RFC.md` | Questão em aberto | customer_id no body ou no path (não decidido) | TRANSCRICAO | [09:32] Larissa |
 | RFC-QA-06 | `docs/RFC.md` | Questão em aberto | Leitura de "5 tentativas" vs. "quase 15 horas" | TRANSCRICAO | [09:17] Diego |
-| RFC-QA-06b | `docs/RFC.md` | Questão em aberto | Resumo final fala em "total 5 tentativas", em conflito com os 5 intervalos | TRANSCRICAO | [09:48] Larissa |
-| ADR-003-D6 | `docs/adrs/ADR-003-retry-backoff-exponencial-e-dlq.md` | Trade-off | Leitura de 6 requisições adotada apesar de "total 5 tentativas" | TRANSCRICAO | [09:48] Larissa |
-| PRD-FR-09b | `docs/PRD.md` | Requisito Funcional | Número de envios do retry pendente de RFC-QA-06 | TRANSCRICAO | [09:48] Larissa |
-| RFC-QA-07 | `docs/RFC.md` | Questão em aberto | Ordering durante retry (derivado de single-worker + backoff) | TRANSCRICAO | [09:12] Diego |
+| RFC-QA-07 | `docs/RFC.md` | Questão em aberto (derivado) | Ordering durante retry (derivado de single-worker + backoff) | TRANSCRICAO | [09:12] Diego |
 | RFC-QA-08 | `docs/RFC.md` | Questão em aberto | Pontos para revisão de segurança (secret em repouso, grace, X-Timestamp) | TRANSCRICAO | [09:46] Sofia |
-| RFC-QA-09 | `docs/RFC.md` | Questão em aberto | Criação de pedido gera evento? Discussão só cobriu changeStatus | TRANSCRICAO | [09:40] Bruno |
-| RFC-QA-10 | `docs/RFC.md` | Questão em aberto | Listagem da DLQ não definida; só o replay | TRANSCRICAO | [09:35] Diego |
+| RFC-QA-09 | `docs/RFC.md` | Questão em aberto (derivado) | Criação de pedido gera evento? Discussão só cobriu changeStatus | TRANSCRICAO | [09:40] Bruno |
+| RFC-QA-10 | `docs/RFC.md` | Questão em aberto (derivado) | Listagem da DLQ não definida; só o replay | TRANSCRICAO | [09:35] Diego |
 | RFC-IMP-01 | `docs/RFC.md` | Risco | Prazo fim de novembro vs. 3 sprints | TRANSCRICAO | [09:46] Larissa |
 | RFC-IMP-02 | `docs/RFC.md` | Integração | changeStatus ganha chamada a publishWebhookEvent | CODIGO | `src/modules/orders/order.service.ts` |
 | RFC-IMP-03 | `docs/RFC.md` | Integração | Novo script worker no package.json | CODIGO | `package.json` |
@@ -113,12 +112,12 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-FLX-03 | `docs/FDD.md` | Fluxo | Retry com backoff 1m/5m/30m/2h/12h | TRANSCRICAO | [09:17] Larissa |
 | FDD-FLX-04 | `docs/FDD.md` | Fluxo | Movimento para DLQ após esgotar tentativas | TRANSCRICAO | [09:18] Diego |
 | FDD-FLX-05 | `docs/FDD.md` | Fluxo | Replay recoloca na outbox como pendente; ADMIN; auditado | TRANSCRICAO | [09:36] Larissa |
-| FDD-FLX-06 | `docs/FDD.md` | Fluxo | Rotação de secret com grace period de 24h | TRANSCRICAO | [09:21] Sofia |
+| FDD-FLX-06 | `docs/FDD.md` | Fluxo (derivado) | Rotação de secret com grace period de 24h | TRANSCRICAO | [09:21] Sofia |
 | FDD-CONTRATO-01 | `docs/FDD.md` | Contrato | POST /webhooks: url, events; secret gerada e devolvida | TRANSCRICAO | [09:31] Marcos |
-| FDD-CONTRATO-02 | `docs/FDD.md` | Contrato | GET /customers/:customerId/webhooks (listar webhooks de um customer) | TRANSCRICAO | [09:33] Bruno |
+| FDD-CONTRATO-02 | `docs/FDD.md` | Contrato | GET /webhooks de um customer | TRANSCRICAO | [09:33] Bruno |
 | FDD-CONTRATO-03 | `docs/FDD.md` | Contrato | PATCH /webhooks/:id | TRANSCRICAO | [09:33] Bruno |
 | FDD-CONTRATO-04 | `docs/FDD.md` | Contrato | DELETE /webhooks/:id | TRANSCRICAO | [09:33] Bruno |
-| FDD-CONTRATO-05 | `docs/FDD.md` | Contrato | POST /webhooks/:id/rotate-secret | TRANSCRICAO | [09:21] Sofia |
+| FDD-CONTRATO-05 | `docs/FDD.md` | Contrato (derivado) | POST /webhooks/:id/rotate-secret | TRANSCRICAO | [09:21] Sofia |
 | FDD-CONTRATO-06 | `docs/FDD.md` | Contrato | GET /webhooks/:id/deliveries (últimos 100) | TRANSCRICAO | [09:34] Marcos |
 | FDD-CONTRATO-07 | `docs/FDD.md` | Contrato | POST /admin/webhooks/dead-letter/:id/replay | TRANSCRICAO | [09:35] Diego |
 | FDD-CONTRATO-08 | `docs/FDD.md` | Contrato | Headers outbound X-Event-Id, X-Signature, X-Timestamp, Content-Type | TRANSCRICAO | [09:44] Diego |
@@ -130,17 +129,17 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-ERR-01 | `docs/FDD.md` | Erro | WEBHOOK_NOT_FOUND | TRANSCRICAO | [09:28] Bruno |
 | FDD-ERR-02 | `docs/FDD.md` | Erro | WEBHOOK_INVALID_URL (via Zod) | TRANSCRICAO | [09:23] Sofia |
 | FDD-ERR-02b | `docs/FDD.md` | Erro | validate middleware converte ZodError em VALIDATION_ERROR | CODIGO | `src/middlewares/validate.middleware.ts` |
-| FDD-ERR-03 | `docs/FDD.md` | Erro | WEBHOOK_CUSTOMER_NOT_FOUND | TRANSCRICAO | [09:29] Larissa |
-| FDD-ERR-04 | `docs/FDD.md` | Erro | WEBHOOK_SECRET_ROTATION_IN_PROGRESS (proposta p/ preservar grace 24h) | TRANSCRICAO | [09:21] Sofia |
-| FDD-ERR-05 | `docs/FDD.md` | Erro | WEBHOOK_DEAD_LETTER_NOT_FOUND | TRANSCRICAO | [09:29] Larissa |
-| FDD-ERR-06 | `docs/FDD.md` | Erro | WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED | TRANSCRICAO | [09:36] Sofia |
-| FDD-ERR-07 | `docs/FDD.md` | Erro | WEBHOOK_ENDPOINT_INACTIVE (endpoint ativo/inativo) | TRANSCRICAO | [09:21] Bruno |
+| FDD-ERR-03 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_CUSTOMER_NOT_FOUND | TRANSCRICAO | [09:32] Larissa |
+| FDD-ERR-04 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_SECRET_ROTATION_IN_PROGRESS (proposta p/ preservar grace 24h) | TRANSCRICAO | [09:21] Sofia |
+| FDD-ERR-05 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_DEAD_LETTER_NOT_FOUND | TRANSCRICAO | [09:18] Diego |
+| FDD-ERR-06 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED | TRANSCRICAO | [09:18] Diego |
+| FDD-ERR-07 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_ENDPOINT_INACTIVE (endpoint ativo/inativo) | TRANSCRICAO | [09:21] Bruno |
 | FDD-ERR-08 | `docs/FDD.md` | Erro | WEBHOOK_DELIVERY_TIMEOUT (10s) | TRANSCRICAO | [09:42] Diego |
-| FDD-ERR-09 | `docs/FDD.md` | Erro | WEBHOOK_DELIVERY_HTTP_ERROR | TRANSCRICAO | [09:15] Diego |
-| FDD-ERR-10 | `docs/FDD.md` | Erro | WEBHOOK_DELIVERY_NETWORK_ERROR (cliente offline) | TRANSCRICAO | [09:14] Larissa |
+| FDD-ERR-09 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_DELIVERY_HTTP_ERROR | TRANSCRICAO | [09:42] Diego |
+| FDD-ERR-10 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_DELIVERY_NETWORK_ERROR (cliente offline) | TRANSCRICAO | [09:04] Bruno |
 | FDD-ERR-11 | `docs/FDD.md` | Erro | WEBHOOK_PAYLOAD_TOO_LARGE (64KB) | TRANSCRICAO | [09:24] Diego |
-| FDD-ERR-12 | `docs/FDD.md` | Erro | WEBHOOK_SECRET_REQUIRED | TRANSCRICAO | [09:28] Bruno |
-| FDD-ERR-13 | `docs/FDD.md` | Erro | WEBHOOK_ENDPOINT_INACTIVE no worker | TRANSCRICAO | [09:21] Bruno |
+| FDD-ERR-12 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_SECRET_REQUIRED | TRANSCRICAO | [09:28] Bruno |
+| FDD-ERR-13 | `docs/FDD.md` | Erro (derivado) | WEBHOOK_ENDPOINT_INACTIVE no worker | TRANSCRICAO | [09:21] Bruno |
 | FDD-ERR-14 | `docs/FDD.md` | Erro | WEBHOOK_MAX_ATTEMPTS_EXCEEDED | TRANSCRICAO | [09:15] Diego |
 | FDD-ERR-15 | `docs/FDD.md` | Erro | NotFoundError fixa código NOT_FOUND; 404 do módulo estendem AppError | CODIGO | `src/shared/errors/http-errors.ts` |
 | FDD-RES-01 | `docs/FDD.md` | Resiliência | Timeout HTTP 10s | TRANSCRICAO | [09:42] Diego |
@@ -151,14 +150,14 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-RES-06 | `docs/FDD.md` | Resiliência | Durabilidade via outbox transacional | TRANSCRICAO | [09:06] Diego |
 | FDD-RES-07 | `docs/FDD.md` | Resiliência | Shutdown gracioso espelhando SIGINT/SIGTERM do server | CODIGO | `src/server.ts` |
 | FDD-RES-08 | `docs/FDD.md` | Resiliência | Limite de payload 64KB | TRANSCRICAO | [09:24] Larissa |
-| FDD-RES-09 | `docs/FDD.md` | Resiliência | Batch pequeno configurável | TRANSCRICAO | [09:08] Diego |
+| FDD-RES-09 | `docs/FDD.md` | Resiliência (derivado) | Batch pequeno configurável | TRANSCRICAO | [09:08] Diego |
 | FDD-RES-10 | `docs/FDD.md` | Integração | Novas chaves WEBHOOK_* no envSchema | CODIGO | `src/config/env.ts` |
 | FDD-OBS-01 | `docs/FDD.md` | Observabilidade | Logs estruturados via Pino existente, sem lib nova | TRANSCRICAO | [09:29] Bruno |
 | FDD-OBS-01b | `docs/FDD.md` | Observabilidade | Redaction de secret motivada por vazamento em log | TRANSCRICAO | [09:22] Diego |
 | FDD-OBS-01c | `docs/FDD.md` | Observabilidade | Log de auditoria do replay com adminUserId | TRANSCRICAO | [09:36] Sofia |
 | FDD-OBS-02 | `docs/FDD.md` | Observabilidade | Métrica de lag p95 < 10s | TRANSCRICAO | [09:02] Marcos |
 | FDD-OBS-02b | `docs/FDD.md` | Observabilidade | Métrica de volume por endpoint para decidir rate limiting | TRANSCRICAO | [09:38] Diego |
-| FDD-OBS-03 | `docs/FDD.md` | Observabilidade | Correlação via X-Request-Id existente | CODIGO | `src/middlewares/request-logger.middleware.ts` |
+| FDD-OBS-03 | `docs/FDD.md` | Observabilidade | Correlação pelo X-Request-Id existente e por orderId/eventId nos logs | CODIGO | `src/middlewares/request-logger.middleware.ts` |
 | FDD-INT-01 | `docs/FDD.md` | Integração | changeStatus chama publishWebhookEvent(tx, order, from, to) | CODIGO | `src/modules/orders/order.service.ts` |
 | FDD-INT-01b | `docs/FDD.md` | Integração | Assinatura publishWebhookEvent proposta por Bruno | TRANSCRICAO | [09:41] Bruno |
 | FDD-INT-02 | `docs/FDD.md` | Integração | canTransition inalterado; events validados contra OrderStatus | CODIGO | `src/modules/orders/order.status.ts` |
@@ -176,9 +175,7 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-INT-12 | `docs/FDD.md` | Integração | Scripts worker/worker:dev; engines node >= 20 (fetch nativo) | CODIGO | `package.json` |
 | FDD-INT-13 | `docs/FDD.md` | Integração | beforeEach limpa tabelas de webhook antes de customer | CODIGO | `tests/setup.ts` |
 | FDD-INT-13b | `docs/FDD.md` | Integração | Factory createTestWebhook | CODIGO | `tests/helpers/factories.ts` |
-| FDD-INT-14 | `docs/FDD.md` | Integração | customerId no path validado como UUID (padrão orderIdParamSchema); page/pageSize como listOrdersQuerySchema | CODIGO | `src/modules/orders/order.schemas.ts` |
-| FDD-INT-14b | `docs/FDD.md` | Restrição | customerId no body (POST) ou no path (GET), nunca do JWT | TRANSCRICAO | [09:32] Larissa |
-| FDD-INT-07c | `docs/FDD.md` | Integração | Router /customers/:customerId/webhooks com mergeParams, registrado antes de /customers | CODIGO | `src/routes/index.ts` |
+| FDD-INT-14 | `docs/FDD.md` | Integração | customerId em query segue listOrdersQuerySchema | CODIGO | `src/modules/orders/order.schemas.ts` |
 | FDD-RSK-01 | `docs/FDD.md` | Risco | Transação de changeStatus mais pesada | TRANSCRICAO | [09:04] Bruno |
 | FDD-RSK-02 | `docs/FDD.md` | Risco | Bug no publish bloqueia mudanças de status (rollback) | TRANSCRICAO | [09:40] Bruno |
 | FDD-RSK-03 | `docs/FDD.md` | Risco | Worker parado acumula eventos | TRANSCRICAO | [09:11] Diego |
@@ -197,7 +194,7 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-AC-08 | `docs/FDD.md` | Critério de aceite | http recusado; replay 403 para OPERATOR, 202 para ADMIN | TRANSCRICAO | [09:36] Larissa |
 | FDD-AC-09 | `docs/FDD.md` | Critério de aceite | Duas assinaturas durante grace de 24h | TRANSCRICAO | [09:21] Sofia |
 | FDD-AC-10 | `docs/FDD.md` | Critério de aceite | Deliveries limitado a 100 itens | TRANSCRICAO | [09:34] Marcos |
-| FDD-AC-11 | `docs/FDD.md` | Critério de aceite | Recuperação de PROCESSING ao reiniciar worker | TRANSCRICAO | [09:11] Diego |
+| FDD-AC-11 | `docs/FDD.md` | Critério de aceite (derivado) | Recuperação de PROCESSING ao reiniciar worker | TRANSCRICAO | [09:11] Diego |
 | FDD-AC-12 | `docs/FDD.md` | Critério de aceite | Testes existentes continuam passando | CODIGO | `tests/orders.test.ts` |
 | FDD-DEP-01 | `docs/FDD.md` | Dependência | Revisão de segurança 2 dias úteis antes do deploy | TRANSCRICAO | [09:46] Sofia |
 | FDD-DEP-02 | `docs/FDD.md` | Dependência | MySQL 8.0 da stack atual | CODIGO | `docker-compose.yml` |
@@ -270,3 +267,11 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | PRD-AC-09 | `docs/PRD.md` | Critério de aceite | Falha no registro desfaz mudança de status | TRANSCRICAO | [09:40] Bruno |
 | PRD-TST-01 | `docs/PRD.md` | Estratégia de teste | Testes de integração no padrão Vitest + Supertest | CODIGO | `tests/orders.test.ts` |
 | PRD-TST-02 | `docs/PRD.md` | Estratégia de teste | Integração no order.service e testes ponta a ponta (meia sprint) | TRANSCRICAO | [09:46] Larissa |
+| RFC-QA-11 | `docs/RFC.md` | Questão em aberto (derivado) | Cliente lento pode prender o worker; cadeias por endpoint propostas | TRANSCRICAO | [09:04] Bruno |
+| RFC-QA-12 | `docs/RFC.md` | Questão em aberto | Soma da estimativa de sprints passa de 3 e a duração do sprint é desconhecida | TRANSCRICAO | [09:46] Larissa |
+| PRD-RSK-07 | `docs/PRD.md` | Risco | Estimativa de 3 sprints apertada frente ao prazo | TRANSCRICAO | [09:46] Larissa |
+| FDD-RSK-09 | `docs/FDD.md` | Risco (derivado) | Cliente lento prende o processamento dos demais | TRANSCRICAO | [09:04] Bruno |
+| FDD-RSK-10 | `docs/FDD.md` | Risco (derivado) | Rotação e histórico acessíveis a qualquer usuário autenticado | TRANSCRICAO | [09:37] Sofia |
+| FDD-AC-13 | `docs/FDD.md` | Critério de aceite (derivado) | Endpoint lento não atrasa a entrega de outro endpoint | TRANSCRICAO | [09:04] Bruno |
+| FDD-AUTH-01 | `docs/FDD.md` | Restrição | Resto do CRUD liberado a qualquer role autenticada, por enquanto | TRANSCRICAO | [09:37] Sofia |
+| FDD-PROP-01 | `docs/FDD.md` | Proposta (derivado) | Tabela do §8.1: valores sugeridos sem origem direta (lote 20, sha256=, 202/409/422 etc.) | TRANSCRICAO | [09:08] Diego |

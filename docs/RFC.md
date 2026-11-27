@@ -4,7 +4,7 @@
 |---|---|
 | **Autora** | Larissa (Tech Lead), responsável pelo doc de design ([09:50] Larissa) |
 | **Status** | Em revisão |
-| **Data** | A definir. A reunião de origem foi numa quinta-feira, às 09:00, e a data exata não consta na transcrição |
+| **Data** | A definir (a transcrição informa só "quinta-feira, 09:00", sem a data da reunião) |
 | **Revisores** | Bruno (Pedidos), Diego (Plataforma), Sofia (Segurança), Marcos (Produto) |
 | **Documentos relacionados** | [PRD](PRD.md) · [FDD](FDD.md) · [ADRs](adrs/README.md) · [Tracker](TRACKER.md) |
 
@@ -37,8 +37,7 @@ Propomos notificar clientes B2B por **webhooks outbound** quando o status de um 
              (processo separado: npm run worker, polling 2s)
                                          ▼
                          webhook.processor ── POST https://cliente
-                          │   X-Signature (HMAC-SHA256) · X-Event-Id
-                          │   X-Webhook-Id · X-Timestamp · timeout 10s
+                          │   assinatura HMAC-SHA256 · timeout 10s
                 ┌─────────┴─────────┐
              2xx: DELIVERED     falha: retry 1m→5m→30m→2h→12h
                                      └─ esgotou → webhook_dead_letter
@@ -49,7 +48,7 @@ Principais elementos da proposta (cada um tem seu ADR):
 
 1. **Captura transacional via outbox no MySQL.** O evento só existe se a mudança de status commitou. O filtro por status assinado é aplicado na inserção. → [ADR-001](adrs/ADR-001-outbox-no-mysql.md)
 2. **Worker dedicado em polling de 2s**, num entry-point novo, `src/worker.ts` (novo), com `PrismaClient` próprio. Fica um único worker nesta fase. → [ADR-002](adrs/ADR-002-worker-separado-em-polling.md)
-3. **Resiliência**: timeout de 10s, 5 retentativas com backoff fixo, DLQ em tabela separada e replay manual auditado. → [ADR-003](adrs/ADR-003-retry-backoff-exponencial-e-dlq.md)
+3. **Resiliência**: timeout de 10s, "5 tentativas" com backoff exponencial de progressão fixa (leitura em RFC-QA-06), DLQ em tabela separada e replay manual auditado. → [ADR-003](adrs/ADR-003-retry-backoff-exponencial-e-dlq.md)
 4. **Autenticidade e integridade**: HMAC-SHA256 sobre o corpo, secret por endpoint gerada pela plataforma, rotação com carência de 24h e URL só `https`. → [ADR-004](adrs/ADR-004-hmac-sha256-com-secret-por-endpoint.md)
 5. **Semântica de entrega at-least-once**, com `X-Event-Id` estável entre retentativas. → [ADR-005](adrs/ADR-005-at-least-once-com-x-event-id.md)
 6. **Módulo `src/modules/webhooks` no padrão da codebase**: `AppError`, códigos `WEBHOOK_*`, Pino, `errorMiddleware`, Zod e `requireRole`. → [ADR-006](adrs/ADR-006-reuso-dos-padroes-existentes.md)
@@ -76,19 +75,21 @@ Principais elementos da proposta (cada um tem seu ADR):
 | RFC-QA-01 | **Rate limiting de saída.** Se 50 pedidos de um cliente mudarem de status em um minuto, enviamos 50 chamadas? | Fora do escopo; **observar e decidir depois** com base nas métricas de volume por endpoint. | [09:38] Diego, [09:39] Larissa |
 | RFC-QA-02 | **Avisar o cliente quando o webhook dele falha** (ex.: e-mail após 3 falhas seguidas) | **Adiado para a próxima fase**, depois de medir o impacto. | [09:37] Marcos, [09:37] Larissa |
 | RFC-QA-03 | **Escalar para múltiplos workers** (particionar por `order_id` ou lock pessimista) | Adiado ("problema do futuro"). Até lá, ordem só por `order_id` e com worker único. | [09:13] Diego, [09:13] Larissa |
-| RFC-QA-04 | **Endurecer a autorização do CRUD de webhooks** (hoje qualquer role autenticada) | "Mais pra frente a gente pode endurecer." | [09:37] Sofia |
-| RFC-QA-05 | **`customer_id` no body ou no path?** A Larissa definiu que ele **não** vem do JWT, mas não escolheu entre body e path. | O FDD propõe body no `POST` de criação e path no `GET` de listagem (`/customers/:customerId/webhooks`), ficando dentro das duas opções faladas. **Precisa de confirmação.** | [09:32] Larissa |
-| RFC-QA-06 | **Leitura de "5 tentativas".** As falas se contradizem. O resumo final diz "**total** 5 tentativas" ([09:48] Larissa), o que sugere 5 envios. Já os 5 intervalos citados somam ~14h36min, e "quase 15 horas entre primeira falha e última tentativa" só fecha com 1 envio inicial + 5 retentativas (6 requisições). | O FDD adota a leitura de 6 requisições, porque é a única que usa os 5 intervalos e a janela de ~15h. Com 5 envios no total, o último intervalo (12h) cai e a janela vira ~2h36min. **Precisa da confirmação de Diego e Larissa.** | [09:17] Diego, [09:17] Larissa, [09:48] Larissa |
+| RFC-QA-04 | **Endurecer a autorização do CRUD de webhooks** (hoje qualquer role autenticada, sem conferir o dono do customer) | "Mais pra frente a gente pode endurecer." | [09:37] Sofia |
+| RFC-QA-05 | **`customer_id` no body ou no path?** A Larissa definiu que ele **não** vem do JWT, mas não escolheu entre body e path. | O FDD propõe body no `POST` e query `customerId` no `GET` de listagem, seguindo `listOrdersQuerySchema`. **Precisa de confirmação.** | [09:32] Larissa |
+| RFC-QA-06 | **Leitura de "5 tentativas".** A reunião diz "5 tentativas" ([09:17], [09:48] Larissa), mas os 5 intervalos citados somam ~14h36min, o que só bate com "quase 15 horas" se forem 1 envio inicial + 5 retentativas (6 requisições). | O FDD adota essa leitura e o ADR-003 a registra. **Precisa da confirmação de Diego e Larissa.** | [09:17] Diego, [09:17] Larissa |
 | RFC-QA-07 | **Ordem durante o retry.** Um evento em backoff pode ser ultrapassado por um evento posterior do mesmo pedido, o que contradiz a "ordem implícita por `order_id`". | Não discutido. Opções: aceitar e documentar, ou segurar os eventos seguintes do mesmo pedido/webhook enquanto houver um em retry. | Derivado de [09:12] Diego + [09:17] Larissa |
-| RFC-QA-08 | **Para a revisão da Sofia:** (a) como proteger a secret em repouso, já que ela não pode ser hash; (b) como o cliente valida durante a carência de 24h (o FDD propõe enviar duas assinaturas); (c) a `X-Timestamp` fica fora do HMAC, que só cobre o corpo, o que limita a proteção contra replay. | Pendente na revisão de segurança (2 dias úteis antes do deploy). | [09:21]/[09:22] Sofia, [09:44] Diego, [09:46] Sofia |
+| RFC-QA-08 | **Para a revisão da Sofia:** (a) como proteger a secret em repouso, já que ela não pode ser hash; (b) como o cliente valida durante a carência de 24h; (c) a `X-Timestamp` fica fora do HMAC, que só cobre o corpo, o que limita a proteção contra replay; (d) `rotate-secret` e `deliveries` não foram cobertos pela liberação do CRUD a qualquer role ([09:37] Sofia) e hoje permitem que qualquer usuário autenticado alcance os dados de qualquer customer (FDD §6.10). | Pendente na revisão de segurança (2 dias úteis antes do deploy). | [09:21]/[09:22] Sofia, [09:44] Diego, [09:46] Sofia |
 | RFC-QA-09 | **Criação de pedido (`PENDING`) gera evento?** A reunião tratou só de mudança de status, ou seja, do `changeStatus`. | Proposta: não gerar nesta fase. Confirmar com o Marcos. | [09:40] Bruno |
 | RFC-QA-10 | **Como o ADMIN encontra o `:id` da DLQ?** Só o endpoint de replay foi definido, não uma listagem. | Nesta fase o id sai dos logs. Avaliar um `GET` admin na revisão. | [09:18] Diego, [09:35] Diego |
+| RFC-QA-11 | **Um cliente lento prende o worker?** Com timeout de 10s, um endpoint fora do ar pode segurar os demais se o lote for processado em série. | O FDD propõe cadeias independentes por endpoint, mantendo um único processo. Validar com Diego e Bruno. | Derivado de [09:04] Bruno + [09:42] Diego |
+| RFC-QA-12 | **Prazo.** A soma das partes da estimativa (1 + 1 + 0,5 + 0,5 + "um pouco") passa de 3 sprints antes de contar os 2 dias úteis da Sofia. A duração do sprint e a data da reunião não constam da transcrição, então não dá para checar se 3 sprints cabem no "fim de novembro" da Atlas. | Confirmar a duração do sprint e o prazo com o Marcos antes de prometer a data. | [09:46] Larissa, [09:45] Marcos |
 
 ## 6. Impacto e riscos
 
 **Impacto no sistema existente**
 - `src/modules/orders/order.service.ts`: a transação de `changeStatus` ganha uma chamada a `publishWebhookEvent`. É a mudança mais crítica, e uma falha nela passa a dar rollback na mudança de status ([09:40] Bruno, [09:41] Diego).
-- `prisma/schema.prisma`: entram 4 tabelas novas (configuração de endpoints, outbox, histórico de entregas, DLQ).
+- `prisma/schema.prisma`: entram tabelas novas para configuração de endpoints, outbox, histórico de entregas e DLQ (detalhe no FDD §4).
 - `package.json`: novo script `worker`. A operação passa a ter dois processos ([09:11] Larissa).
 - Nenhuma mudança em `errorMiddleware`, `auth.middleware` ou no logger ([09:29] Bruno).
 

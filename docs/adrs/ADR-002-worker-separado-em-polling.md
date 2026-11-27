@@ -17,10 +17,10 @@ Com a outbox ([ADR-001](ADR-001-outbox-no-mysql.md)), algum componente precisa l
 
 ## Decisão
 
-- **Polling em loop a cada 2 segundos.** A cada ciclo o worker busca, em lote pequeno, os eventos `PENDING` mais antigos (ordenados por `created_at`), processa e marca o resultado ([09:09] Diego, [09:08] Diego). Fica aceita uma latência de pelo menos ~2s ([09:10] Larissa, [09:10] Marcos).
+- **Polling em loop a cada 2 segundos.** A cada ciclo o worker busca, em lote pequeno, os eventos prontos para envio (`PENDING`, ou `FAILED` com a próxima tentativa já vencida), do mais antigo para o mais novo (`created_at`), processa e marca o resultado ([09:09] Diego, [09:08] Diego). Fica aceita uma latência de pelo menos ~2s ([09:10] Larissa, [09:10] Marcos).
 - **Processo separado da API.** Novo entry-point `src/worker.ts` (novo), espelhando `src/server.ts`, e novo script `npm run worker` em `package.json` ([09:11] Larissa). Se a API reiniciar, o worker não cai junto ([09:11] Diego).
 - **Mesma stack e mesmo banco:** mesma `DATABASE_URL` (validada por `src/config/env.ts`), mas uma **instância própria de `PrismaClient`**, porque o client é por processo ([09:30] Bruno).
-- A lógica de processamento fica dentro do módulo, em `src/modules/webhooks/webhook.processor.ts` (novo). `src/worker.ts` só faz bootstrap e shutdown ([09:28] Bruno).
+- A lógica de processamento fica dentro do módulo, em `src/modules/webhooks/webhook.processor.ts` (novo). O Bruno deixou em aberto entre `webhook.worker.ts` e `webhook.processor.ts` ([09:28] Bruno), e o FDD adota o segundo. `src/worker.ts` só faz bootstrap e shutdown.
 - **Um único worker** nesta fase. Com isso a ordem de entrega fica garantida apenas por `order_id`, e só enquanto houver um worker. Isso é uma **limitação conhecida** ([09:12] Diego, [09:13] Larissa).
 
 ## Alternativas consideradas
@@ -34,7 +34,7 @@ Com a outbox ([ADR-001](ADR-001-outbox-no-mysql.md)), algum componente precisa l
 ## Consequências
 
 **Positivas**
-- É simples: um `setInterval`/loop e uma query indexada (`status`, `created_at`).
+- É simples: um loop com intervalo de 2s entre ciclos, sem sobreposição de seleção, e uma query indexada (`status`, `created_at`).
 - 2s de polling cabe com folga no limite de 10s ([09:09] Diego).
 - Isolamento de falhas entre API e worker, sem infraestrutura nova.
 

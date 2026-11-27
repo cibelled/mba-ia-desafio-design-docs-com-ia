@@ -3,7 +3,7 @@
 | Campo | Valor |
 |---|---|
 | **Feature** | Webhooks outbound de mudança de status de pedido |
-| **Status** | Pronto para implementação (depende do fechamento das questões RFC-QA-05, 06 e 09) |
+| **Status** | Em revisão, junto com o RFC. Pendências para fechar antes de codar: RFC-QA-05, 06, 07, 09 e 10 |
 | **Proposta de origem** | [RFC-001](RFC.md) |
 | **Decisões** | [ADR-001](adrs/ADR-001-outbox-no-mysql.md) a [ADR-007](adrs/ADR-007-payload-snapshot-na-insercao.md) |
 | **Rastreabilidade** | [TRACKER.md](TRACKER.md). Os IDs entre colchetes, como `FDD-FLX-01`, aparecem lá. |
@@ -101,7 +101,7 @@ model WebhookOutbox {                                    // [09:06] Diego
   @@map("webhook_outbox")
 }
 
-model WebhookDelivery {                                  // histórico [09:34] Marcos
+model WebhookDelivery {                                  // PROPOSTA: a reunião pediu o histórico [09:34] Marcos, mas não definiu tabela
   id             String   @id @default(uuid()) @db.Char(36)
   webhookId      String   @db.Char(36)
   eventId        String   @db.Char(36)
@@ -124,7 +124,7 @@ model WebhookDelivery {                                  // histórico [09:34] M
 model WebhookDeadLetter {                                // [09:18] Diego
   id            String    @id @default(uuid()) @db.Char(36)
   eventId       String    @db.Char(36)
-  webhookId     String?   @db.Char(36)   // sem FK rígida: preserva evidência se o endpoint for removido
+  webhookId     String    @db.Char(36)   // sem FK: a linha sobrevive à remoção do endpoint (ver §6.4)
   orderId       String    @db.Char(36)
   payload       Json
   failureReason String    @db.VarChar(500)
@@ -170,7 +170,7 @@ sequenceDiagram
 
 1. `publishWebhookEvent` é chamada **depois** do `insert` em `order_status_history` e **antes** do `findUnique` final (`refreshed`), sempre com o mesmo `tx` ([09:41] Bruno).
 2. Os endpoints são lidos com `tx.webhookEndpoint.findMany({ where: { customerId: order.customerId, active: true } })`.
-3. O filtro é feito em memória: `endpoint.events.includes(to)` ([09:33] Marcos, [09:34] Bruno).
+3. O filtro é feito em memória: `(endpoint.events as OrderStatus[]).includes(to)`. O cast é necessário porque a coluna é `Json`, e o conteúdo já foi validado por `z.nativeEnum(OrderStatus)` na gravação ([09:33] Marcos, [09:34] Bruno).
 4. Para cada endpoint interessado é gerado um `id = uuidv4()`, usando o pacote `uuid` que já está no `package.json`. Esse `id` é o `event_id`, montado no payload (§6.8). A linha entra com `status = PENDING` e `nextAttemptAt = now()`.
 5. As inserções usam `tx.webhookOutbox.createMany`. Se falhar, a exceção sobe e o Prisma faz rollback da transação inteira. O cliente da API recebe 500 `INTERNAL_SERVER_ERROR` do `errorMiddleware`, e o status do pedido **não muda** ([09:40] Bruno, [09:41] Diego).
 
@@ -178,20 +178,23 @@ sequenceDiagram
 
 ### 5.2 [FDD-FLX-02] Processamento pelo worker (ciclo de polling)
 
-Executado por `src/modules/webhooks/webhook.processor.ts` (novo), disparado por `src/worker.ts` (novo) a cada `WEBHOOK_POLL_INTERVAL_MS` (padrão **2000**, [09:09] Diego).
+Executado por `src/modules/webhooks/webhook.processor.ts` (novo), disparado por `src/worker.ts` (novo) a cada `WEBHOOK_POLL_INTERVAL_MS` (padrão **2000**, [09:09] Diego). O Bruno deixou em aberto o nome do arquivo (`webhook.worker.ts` ou `webhook.processor.ts`, [09:28] Bruno); este FDD adota `webhook.processor.ts`.
 
 1. **Recuperação no startup:** linhas em `PROCESSING` voltam para `PENDING`. Como há um único worker ([09:12] Diego), qualquer `PROCESSING` no boot é resto de um processo que morreu no meio de um ciclo.
-2. **Seleção do lote:** busca linhas com `status IN (PENDING, FAILED)` e `nextAttemptAt <= now()`, ordenadas por `createdAt ASC`, com `take = WEBHOOK_BATCH_SIZE` ("batch pequeno", [09:08] Diego; padrão proposto: 20).
+2. **Seleção do lote:** busca linhas com `status IN (PENDING, FAILED)` e `nextAttemptAt <= now()`, ordenadas por `createdAt ASC`, com `take = WEBHOOK_BATCH_SIZE` ("batch pequeno", [09:08] Diego; o valor 20 é sugestão, ver §8.1).
 3. **Reserva:** `updateMany` para `PROCESSING` usando os ids do lote.
-4. **Processamento sequencial**, um evento por vez e na ordem de `createdAt`, o que preserva a ordem por `order_id` ([09:12] Diego):
-   1. carrega o `WebhookEndpoint`. Se foi removido ou está `active=false`, a linha vai para a DLQ com o motivo `WEBHOOK_ENDPOINT_INACTIVE`, sem enviar;
+4. **Agrupamento por endpoint (proposta, ver RFC-QA-11).** O lote é agrupado por `webhookId`. Cada grupo roda como uma cadeia assíncrona própria, **em ordem de `createdAt`**. O worker guarda o conjunto de `webhookId` com cadeia em andamento e **não inicia outra cadeia para o mesmo endpoint**. Assim, um cliente lento ou fora do ar prende só a própria cadeia, e os eventos dos outros clientes seguem no próximo ciclo de 2s. O ciclo **não espera** as cadeias terminarem. Isso preserva o argumento de [09:04] Bruno (cliente lento não trava os outros) dentro do worker e continua sendo um único processo, como decidido ([09:12] Diego).
+5. **Para cada evento da cadeia**, dentro de um `try/catch` próprio:
+   1. carrega o `WebhookEndpoint`. Se está `active=false` ou foi removido, a linha vai para a DLQ com o motivo `WEBHOOK_ENDPOINT_INACTIVE`, sem enviar;
    2. serializa o `payload` com `JSON.stringify`. Se `Buffer.byteLength > 65536`, vai para a DLQ com `WEBHOOK_PAYLOAD_TOO_LARGE`, **sem retry e sem envio** ([09:23] Sofia, [09:24] Diego);
    3. calcula `X-Signature` (§6.9) e monta os headers;
-   4. faz o `POST` com `fetch` nativo do Node ≥ 20 (`engines` em `package.json`) e `signal: AbortSignal.timeout(10_000)` ([09:42] Diego);
+   4. faz o `POST` com `fetch` nativo do Node ≥ 20 (`engines` em `package.json`) e `signal: AbortSignal.timeout(WEBHOOK_HTTP_TIMEOUT_MS)`, padrão 10.000 ms ([09:42] Diego);
    5. grava uma linha em `webhook_deliveries` com o resultado da tentativa;
    6. **se o status for 2xx**, passa para `DELIVERED`, `deliveredAt = now()` e `attempts += 1`;
-   7. **em qualquer outro resultado**, aplica a política de retry (§5.3).
-5. O ciclo termina com o log `webhook_worker_cycle` (§9). O próximo ciclo só começa depois que o atual termina, então não há sobreposição.
+   7. **em qualquer outro resultado**, aplica a política de retry (§5.3);
+   8. **se uma exceção inesperada escapar** (por exemplo, falha ao gravar `webhook_deliveries`), o `catch` devolve a linha a `FAILED` com `lastError = INTERNAL_ERROR` e `nextAttemptAt = now()`, e registra o log `webhook_event_error`. Nenhuma linha fica presa em `PROCESSING` fora de um crash do processo.
+6. **Ordem de entrega.** Dentro de um endpoint, os eventos saem na ordem de `createdAt` enquanto não houver falha. Um evento em `FAILED` espera o seu `nextAttemptAt`, e um evento posterior do mesmo pedido pode ser entregue antes dele. Isso **não** está resolvido na reunião e é a questão RFC-QA-07.
+7. O log `webhook_worker_cycle` (§9) é emitido a cada ciclo. O próximo ciclo começa sempre `WEBHOOK_POLL_INTERVAL_MS` depois do anterior, sem sobreposição de seleção de lote, porque o ciclo só seleciona, reserva e dispara cadeias.
 
 ### 5.3 [FDD-FLX-03] Retry com backoff
 
@@ -204,9 +207,9 @@ Executado por `src/modules/webhooks/webhook.processor.ts` (novo), disparado por 
 | Retentativa 4 | 5 | +12 h |
 | Retentativa 5 | 6 | → DLQ (§5.4) |
 
-Fonte: [09:17] Diego e [09:17] Larissa. A transcrição é ambígua aqui: o resumo final fala em "**total** 5 tentativas" ([09:48] Larissa), mas os 5 intervalos citados somam ~14h36min ("quase 15 horas entre primeira falha e última tentativa", [09:17] Diego), o que só fecha com envio inicial + 5 retentativas. Este FDD adota a segunda leitura, pendente de confirmação em RFC-QA-06. Se a confirmação for "5 envios no total", basta tirar a última linha da tabela, ou seja, trocar a constante `MAX_ATTEMPTS` de 6 para 5.
+Fonte: [09:17] Diego e [09:17] Larissa ("5 tentativas"; "total 5 tentativas" em [09:48] Larissa). A leitura **"envio inicial + 5 retentativas"** vem da soma dos intervalos, ~14h36min ("quase 15 horas"), e está **pendente de confirmação** em RFC-QA-06. Se a confirmação for "5 envios no total", basta tirar a última linha da tabela, ou seja, trocar a constante `MAX_ATTEMPTS` de 6 para 5.
 
-Implementação: `const BACKOFF_SCHEDULE_MS = [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000]`. Na falha, `status = FAILED`, `lastError = <código>`, `nextAttemptAt = now() + BACKOFF_SCHEDULE_MS[attempts - 1]`.
+Progressão: backoff exponencial com intervalos fixos. Implementação: `const BACKOFF_SCHEDULE_MS = [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000]`. Na falha, `status = FAILED`, `lastError = <código>`, `nextAttemptAt = now() + BACKOFF_SCHEDULE_MS[attempts - 1]`.
 
 Contam como falha ([09:42] Diego): timeout (`WEBHOOK_DELIVERY_TIMEOUT`), erro de rede/DNS/TLS (`WEBHOOK_DELIVERY_NETWORK_ERROR`) e qualquer status fora de 2xx (`WEBHOOK_DELIVERY_HTTP_ERROR`). Redirecionamentos não são seguidos (`redirect: 'manual'`), então 3xx conta como falha.
 
@@ -241,7 +244,7 @@ Geração da secret: `crypto.randomBytes(32).toString('hex')`, com `node:crypto`
 
 Todas as rotas ficam sob `/api/v1` (`src/routes/index.ts`), exigem `Authorization: Bearer <jwt>` (`authenticate`) e usam o envelope de erro padrão `{ "error": { "code", "message", "details?" } }` (`src/middlewares/error.middleware.ts`). O CRUD aceita **qualquer role autenticada** ([09:37] Sofia). O replay exige **ADMIN** ([09:36] Larissa).
 
-O `customerId` **não** vem do JWT e é "passado no body ou no path" ([09:32] Larissa). Por isso vai no **body** do `POST` (criação) e no **path** do `GET` de listagem (`/customers/:customerId/webhooks`), já que um `GET` não tem body. A validação do parâmetro segue `orderIdParamSchema` (`z.string().uuid()`) em `src/modules/orders/order.schemas.ts`. A escolha exata de body/path por rota ainda está pendente de confirmação em RFC-QA-05.
+O `customerId` **não** vem do JWT ([09:32] Larissa). Por isso vai no body do `POST` e na query do `GET` de listagem, seguindo `listOrdersQuerySchema` em `src/modules/orders/order.schemas.ts`. Isso ainda está pendente de confirmação em RFC-QA-05.
 
 ### 6.1 [FDD-CONTRATO-01] `POST /api/v1/webhooks`: cadastrar webhook ([09:31] Marcos)
 
@@ -253,7 +256,7 @@ Content-Type: application/json
 
 {
   "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
-  "url": "https://hooks.atlascomercial.com.br/oms/orders",
+  "url": "https://hooks.example.com/oms/orders",
   "events": ["SHIPPED", "DELIVERED"]
 }
 ```
@@ -281,8 +284,13 @@ Content-Type: application/json
 
 Schema (`webhook.schemas.ts`, novo):
 ```ts
-const httpsUrl = z.string().url().max(2048)
-  .refine((u) => new URL(u).protocol === 'https:', 'WEBHOOK_INVALID_URL: url must use https'); // [09:23] Sofia
+// [09:23] Sofia. O Zod 3 executa o refine mesmo quando .url() falha, e new URL() lançaria
+// TypeError (virando 500). Por isso o try/catch dentro do superRefine.
+const httpsUrl = z.string().max(2048).superRefine((value, ctx) => {
+  let ok = false;
+  try { ok = new URL(value).protocol === 'https:'; } catch { ok = false; }
+  if (!ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'WEBHOOK_INVALID_URL: url must be a valid https URL' });
+});
 export const createWebhookSchema = z.object({
   customerId: z.string().uuid(),
   url: httpsUrl,
@@ -290,14 +298,9 @@ export const createWebhookSchema = z.object({
 });
 ```
 
-### 6.2 [FDD-CONTRATO-02] `GET /api/v1/customers/:customerId/webhooks`: listar webhooks de um customer ([09:33] Bruno, [09:32] Larissa)
+### 6.2 [FDD-CONTRATO-02] `GET /api/v1/webhooks?customerId=…`: listar webhooks de um customer ([09:33] Bruno)
 
-**Request**
-```http
-GET /api/v1/customers/6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90/webhooks?page=1&pageSize=20
-Authorization: Bearer eyJhbGciOi...
-```
-`page` e `pageSize` seguem os limites de `listOrdersQuerySchema` (`pageSize` de 1 a 100, padrão 20).
+**Request:** `GET /api/v1/webhooks?customerId=6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90&page=1&pageSize=20`
 
 **Response 200**, com paginação de `src/shared/http/response.ts`:
 ```json
@@ -309,7 +312,7 @@ Authorization: Bearer eyJhbGciOi...
       "url": "https://hooks.atlascomercial.com.br/oms/orders",
       "events": ["SHIPPED", "DELIVERED"],
       "active": true,
-      "secretRotationExpiresAt": null,
+      "previousSecretExpiresAt": null,
       "createdAt": "2026-11-26T12:00:00.000Z",
       "updatedAt": "2026-11-26T12:00:00.000Z"
     }
@@ -320,35 +323,18 @@ Authorization: Bearer eyJhbGciOi...
 | Status | Quando |
 |---|---|
 | 200 | Lista, possivelmente vazia |
-| 400 | `customerId` do path que não é UUID, ou `page`/`pageSize` inválidos |
+| 400 | `customerId` ausente ou que não é UUID |
 | 401 | Não autenticado |
-| 404 | `WEBHOOK_CUSTOMER_NOT_FOUND` |
 
 ### 6.3 [FDD-CONTRATO-03] `PATCH /api/v1/webhooks/:id`: editar ([09:33] Bruno)
 
 **Request**
-```http
-PATCH /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f
-Authorization: Bearer eyJhbGciOi...
-Content-Type: application/json
-
+```json
 { "events": ["PAID", "SHIPPED", "DELIVERED"], "active": true }
 ```
 Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1)`), `active`. `customerId` e `secret` **não** são editáveis por aqui.
 
-**Response 200** (mesmo formato de item do §6.2, sem `secret`)
-```json
-{
-  "id": "0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f",
-  "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
-  "url": "https://hooks.atlascomercial.com.br/oms/orders",
-  "events": ["PAID", "SHIPPED", "DELIVERED"],
-  "active": true,
-  "secretRotationExpiresAt": null,
-  "createdAt": "2026-11-26T12:00:00.000Z",
-  "updatedAt": "2026-11-26T14:10:00.000Z"
-}
-```
+**Response 200:** mesmo formato de item do §6.2.
 
 | Status | Quando |
 |---|---|
@@ -358,29 +344,16 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 
 ### 6.4 [FDD-CONTRATO-04] `DELETE /api/v1/webhooks/:id`: remover ([09:33] Bruno)
 
-**Request**
-```http
-DELETE /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f
-Authorization: Bearer eyJhbGciOi...
-```
-
-**Response 204:** sem corpo. **Response 404:**
-```json
-{ "error": { "code": "WEBHOOK_NOT_FOUND", "message": "Webhook not found" } }
-```
+**Request:** `DELETE /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f`  **Response 204:** sem corpo.
 
 | Status | Quando |
 |---|---|
-| 204 | Removido. Linhas pendentes na outbox e o histórico de entregas saem em cascade. Registros da DLQ ficam guardados como evidência. |
+| 204 | Removido. Numa única transação, as linhas `PENDING`/`FAILED`/`PROCESSING` desse webhook na outbox são **movidas para a DLQ** com motivo `WEBHOOK_ENDPOINT_INACTIVE` (nenhum evento some em silêncio), e só então o endpoint é apagado. O histórico em `webhook_deliveries` sai em cascade. A DLQ guarda a evidência. |
 | 404 | `WEBHOOK_NOT_FOUND` |
 
 ### 6.5 [FDD-CONTRATO-05] `POST /api/v1/webhooks/:id/rotate-secret`: rotacionar secret ([09:21] Sofia)
 
-**Request** (sem corpo)
-```http
-POST /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f/rotate-secret
-Authorization: Bearer eyJhbGciOi...
-```
+**Request:** sem corpo.
 
 **Response 200**
 ```json
@@ -398,12 +371,7 @@ Authorization: Bearer eyJhbGciOi...
 
 ### 6.6 [FDD-CONTRATO-06] `GET /api/v1/webhooks/:id/deliveries`: histórico de entregas ([09:34] Marcos)
 
-**Request**
-```http
-GET /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f/deliveries?limit=100
-Authorization: Bearer eyJhbGciOi...
-```
-`limit` vai de 1 a 100 (padrão 100), com ordenação por `createdAt DESC`.
+**Request:** `GET /api/v1/webhooks/0b7e9c3d-.../deliveries?limit=100` (`limit` de 1 a 100, padrão 100, ordenado por `createdAt DESC`). O número 100 vem de um exemplo do Marcos ("tipo, os últimos 100", [09:34]) e é proposta de implementação (§8.1).
 
 **Response 200**
 ```json
@@ -438,18 +406,14 @@ Authorization: Bearer eyJhbGciOi...
 ```
 | Status | Quando |
 |---|---|
-| 200 | Últimas N tentativas, com sucesso/falha, payload, resposta e tempo ([09:34] Marcos) |
+| 200 | Últimas N tentativas, com sucesso/falha, payload, resposta e tempo ([09:34] Marcos). Sem verificação de dono: ver §6.10 |
 | 404 | `WEBHOOK_NOT_FOUND` |
 
 ### 6.7 [FDD-CONTRATO-07] `POST /api/v1/admin/webhooks/dead-letter/:id/replay`: replay de DLQ ([09:18] Diego, [09:36] Sofia)
 
 Middlewares: `authenticate`, `requireRole('ADMIN')` e `validate({ params })`.
 
-**Request** (sem corpo; o JWT precisa ser de um usuário `ADMIN`)
-```http
-POST /api/v1/admin/webhooks/dead-letter/c3d4e5f6-0000-4000-8000-00000000abcd/replay
-Authorization: Bearer eyJhbGciOi...
-```
+**Request:** sem corpo.
 
 **Response 202**
 ```json
@@ -507,8 +471,13 @@ const header = [sig(endpoint.secret),
 ].join(',');
 ```
 - Algoritmo HMAC-SHA256 sobre o **corpo** ([09:22] Sofia).
+- O prefixo `sha256=` e o formato do header são **proposta** (a Sofia disse só "um header tipo X-Signature", [09:20] Sofia).
 - Durante a carência de 24h, o header traz **duas** assinaturas separadas por vírgula, e o cliente aceita se qualquer uma bater. **É uma proposta** para a regra "a antiga fica válida em paralelo" ([09:21] Sofia) e depende da revisão (RFC-QA-08).
-- Orientação ao cliente, a publicar no portal ([09:26] Marcos): comparar com `timingSafeEqual` e deduplicar por `X-Event-Id`.
+- Orientação ao cliente a publicar no portal: deduplicar por `X-Event-Id` ([09:26] Marcos se comprometeu a documentar a dedup) e, como boa prática proposta aqui, comparar a assinatura com `timingSafeEqual`.
+
+### 6.10 Autorização das rotas de configuração (ponto para a revisão de segurança)
+
+A reunião liberou "o resto do CRUD de configuração" para qualquer role autenticada, "por enquanto" ([09:36] Marcos, [09:37] Sofia). Duas rotas deste FDD vão além do CRUD e **não foram discutidas**: `rotate-secret` (§6.5), que devolve a secret em texto, e `deliveries` (§6.6), que devolve payloads e respostas. Como o `customerId` não vem do JWT ([09:32] Larissa), nenhuma rota confere se o usuário autenticado pertence ao customer do webhook. Portanto, **qualquer usuário autenticado poderia rotacionar a secret ou ler o histórico de qualquer customer**. Este FDD segue a decisão literal da reunião e registra o ponto como RFC-QA-04 e RFC-QA-08 para a revisão da Sofia.
 
 ---
 
@@ -536,8 +505,8 @@ As classes ficam em `src/modules/webhooks/webhook.errors.ts` (novo) e estendem a
 | FDD-ERR-09 | `WEBHOOK_DELIVERY_HTTP_ERROR` | Sim | Status fora de 2xx (inclui 3xx, 4xx e 5xx) |
 | FDD-ERR-10 | `WEBHOOK_DELIVERY_NETWORK_ERROR` | Sim | DNS, conexão recusada, falha de TLS |
 | FDD-ERR-11 | `WEBHOOK_PAYLOAD_TOO_LARGE` | **Não**, vai direto para a DLQ | Corpo > 64KB ([09:24] Larissa) |
-| FDD-ERR-12 | `WEBHOOK_SECRET_REQUIRED` | **Não**, vai direto para a DLQ | Endpoint sem secret válida para assinar (invariante violada) ([09:28] Bruno) |
-| FDD-ERR-13 | `WEBHOOK_ENDPOINT_INACTIVE` | **Não**, vai direto para a DLQ | Endpoint desativado ou removido entre a inserção e o envio |
+| FDD-ERR-12 | `WEBHOOK_SECRET_REQUIRED` | **Não**, vai direto para a DLQ | Nome citado na reunião ([09:28] Bruno), sem cenário definido. Uso proposto, apenas defensivo: o worker encontra o endpoint sem secret para assinar (a coluna é obrigatória, então só ocorreria por dado corrompido) |
+| FDD-ERR-13 | `WEBHOOK_ENDPOINT_INACTIVE` | **Não**, vai direto para a DLQ | Endpoint desativado (`active=false`) entre a inserção e o envio. Na remoção, as linhas já foram movidas para a DLQ por `DELETE` (§6.4) |
 | FDD-ERR-14 | `WEBHOOK_MAX_ATTEMPTS_EXCEEDED` | — | Retentativas esgotadas, motivo final na DLQ ([09:15] Diego) |
 
 > Uma falha ao inserir na outbox **dentro** de `changeStatus` não tem código próprio. É um erro do Prisma que vira 500 `INTERNAL_SERVER_ERROR` no `errorMiddleware` e dá rollback na mudança de status (FDD-FLX-01, passo 5).
@@ -548,17 +517,37 @@ As classes ficam em `src/modules/webhooks/webhook.errors.ts` (novo) e estendem a
 
 | ID | Estratégia | Valor | Origem |
 |---|---|---|---|
-| FDD-RES-01 | Timeout por requisição | 10s (`AbortSignal.timeout`) | [09:42] Diego |
-| FDD-RES-02 | Retry com backoff exponencial fixo | 1m, 5m, 30m, 2h, 12h | [09:17] Larissa |
-| FDD-RES-03 | Teto de retentativas e depois DLQ | 5 retentativas → `webhook_dead_letter` | [09:15] Diego, [09:18] Diego |
+| FDD-RES-01 | Timeout por requisição | 10s (`WEBHOOK_HTTP_TIMEOUT_MS`, `AbortSignal.timeout`) | [09:42] Diego |
+| FDD-RES-02 | Retry com backoff exponencial, progressão fixa | 1m, 5m, 30m, 2h, 12h | [09:17] Larissa |
+| FDD-RES-03 | Teto de tentativas e depois DLQ | "5 tentativas" ([09:17], [09:48] Larissa). Leitura adotada: 1 envio + 5 retentativas, a confirmar (RFC-QA-06) → `webhook_dead_letter` | [09:15] Diego, [09:18] Diego |
 | FDD-RES-04 | Fallback operacional | Replay manual via endpoint ADMIN. Sem fallback automático: o e-mail ficou para a próxima fase. | [09:18] Diego, [09:37] Larissa |
 | FDD-RES-05 | Isolamento de falhas | Worker em processo separado. A API não depende dele, e ele não depende da API. | [09:11] Diego |
-| FDD-RES-06 | Durabilidade | O evento é persistido na transação. Se o worker cair, os eventos acumulam sem perda, e as linhas `PROCESSING` são recuperadas no boot. | [09:06] Diego |
-| FDD-RES-07 | Shutdown gracioso | `src/worker.ts` (novo) trata `SIGINT`/`SIGTERM` como `src/server.ts`: termina o evento em curso, para o loop e chama `prisma.$disconnect()` | `src/server.ts` |
+| FDD-RES-06 | Durabilidade | O evento é persistido na transação. Se o worker cair, os eventos acumulam sem perda. As linhas `PROCESSING` são recuperadas no boot, e exceções por evento devolvem a linha a `FAILED` (§5.2 passo 5.8). | [09:06] Diego |
+| FDD-RES-07 | Shutdown gracioso | `src/worker.ts` (novo) trata `SIGINT`/`SIGTERM` como `src/server.ts`, **com um comportamento novo**: para de iniciar cadeias, aguarda as cadeias em andamento (cada uma limitada pelo timeout de 10s) e só então chama `prisma.$disconnect()`. O `server.ts` atual não aguarda nada: chama `$disconnect()` e `process.exit(0)` | `src/server.ts` |
 | FDD-RES-08 | Limite de payload | 64KB, com erro e sem truncar | [09:24] Larissa |
-| FDD-RES-09 | Tamanho do lote | `WEBHOOK_BATCH_SIZE`. A reunião só disse "batch pequeno". O padrão sugerido de 20 é configurável e deve ser validado com o Diego | [09:08] Diego |
+| FDD-RES-09 | Tamanho do lote | `WEBHOOK_BATCH_SIZE`. A reunião só disse "batch pequeno" ([09:08] Diego). O valor 20 é sugestão e deve ser validado com o Diego (§8.1) | [09:08] Diego |
 
 Configuração em `src/config/env.ts`, com novas chaves opcionais e defaults no schema Zod: `WEBHOOK_POLL_INTERVAL_MS=2000`, `WEBHOOK_HTTP_TIMEOUT_MS=10000`, `WEBHOOK_BATCH_SIZE=20`.
+
+### 8.1 Propostas deste FDD sem origem direta na reunião
+
+Valores e regras que o FDD precisou escolher para fechar o desenho. Nenhum veio de uma fala; todos devem ser confirmados na sessão de revisão com Bruno e Diego ([09:50] Larissa), e a revisão de segurança da Sofia cobre os de segurança.
+
+| Item | Valor proposto | Onde aparece |
+|---|---|---|
+| Tamanho do lote | 20 (a reunião disse "batch pequeno", [09:08] Diego) | §5.2, §8 |
+| Agrupamento por endpoint com cadeias independentes | Resposta ao risco de um cliente lento prender o ciclo (RFC-QA-11) | §5.2 |
+| Prefixo `sha256=` e duas assinaturas durante a carência | Formato do header e da validação na janela de 24h | §6.9 |
+| Códigos HTTP 202 (replay), 409 (rotação duplicada), 422 (endpoint inativo) | Semântica de resposta | §6 |
+| `redirect: 'manual'`, com 3xx contado como falha | Evitar seguir redirecionamentos | §5.3 |
+| `limit` de 1 a 100, padrão 100 | A reunião deu 100 como exemplo ([09:34] Marcos) | §6.6 |
+| `VarChar(2048)` na URL, `VarChar(128)` na secret, `randomBytes(32)` | Dimensionamento e geração | §4, §5.6 |
+| Payload acima de 64KB e endpoint inativo vão para a DLQ | A reunião só disse "erra" ([09:23] Sofia) | §5.2 |
+| Tabela `webhook_deliveries` | A reunião pediu o histórico, sem definir tabela | §4 |
+| Métrica p95 para a latência | A reunião disse "abaixo de 10 segundos" ([09:02] Marcos) | §9.2 |
+| Recusa de segunda rotação dentro das 24h | Preservar a carência | §5.6 |
+| Nome do arquivo `webhook.processor.ts` | O Bruno deixou entre `.worker.ts` e `.processor.ts` ([09:28]) | §5.2 |
+
 
 ---
 
@@ -585,7 +574,7 @@ A reunião decidiu **não adicionar ferramentas novas** ([09:29] Bruno, [09:30] 
 
 | Métrica | Como obter | Alvo/uso |
 |---|---|---|
-| `webhook_delivery_lag_ms` (commit → 1ª tentativa) | `lagMs` em `webhook_delivery_succeeded` (`now - outbox.createdAt`) quando `attempt=1` | p95 < 10.000 ms ([09:02] Marcos) |
+| `webhook_delivery_lag_ms` (commit → 1ª tentativa) | `lagMs` em `webhook_delivery_succeeded` (`now - outbox.createdAt`) quando `attempt=1` | < 10.000 ms para a primeira tentativa ([09:02] Marcos); o uso do p95 é proposta (§8.1) |
 | `webhook_outbox_backlog` | `backlog` em `webhook_worker_cycle`, a partir de `COUNT(*) WHERE status IN (PENDING,FAILED)` | Tendência de alta = worker parado ou lento |
 | `webhook_delivery_success_rate` | `success` em `webhook_deliveries`, por endpoint/dia | Comparar endpoints |
 | `webhook_dead_letter_total` | `COUNT(*)` em `webhook_dead_letter WHERE replayedAt IS NULL` | Gatilho para ação manual de ADMIN |
@@ -595,7 +584,7 @@ A reunião decidiu **não adicionar ferramentas novas** ([09:29] Bruno, [09:30] 
 
 Sem biblioteca de tracing. A **correlação** é feita por:
 - **`eventId`** como chave de rastreio ponta a ponta: aparece em todos os logs do evento (enfileiramento, cada tentativa, DLQ, replay), nas tabelas e no header `X-Event-Id` que o cliente recebe. O suporte consegue cruzar com os logs do cliente.
-- **`requestId`** (do `request-logger.middleware.ts`) registrado no log `webhook_event_enqueued`. Para isso, `changeStatus` passa a receber o `requestId` como parâmetro opcional, repassado por `OrderController.changeStatus` a partir de `req.id`. Isso liga a requisição HTTP que mudou o status a cada evento gerado.
+- **Não** se propõe nenhuma mudança na assinatura de `changeStatus` para propagar o `requestId` (isso exigiria alterar `order.controller.ts` e `order.service.ts` além do previsto). O `X-Request-Id` existente (`src/middlewares/request-logger.middleware.ts`) continua identificando a requisição HTTP nos logs da API, A ligação entre a requisição que mudou o status e o evento é feita por `orderId`, `toStatus` e horário no log `webhook_event_enqueued`. Uma correlação direta por `requestId` fica como melhoria futura.
 - Distributed tracing (OpenTelemetry) fica fora desta fase pela decisão de não adicionar libs, e pode ser reavaliado depois.
 
 ---
@@ -610,7 +599,7 @@ Sem biblioteca de tracing. A **correlação** é feita por:
 | FDD-INT-04 | `src/middlewares/error.middleware.ts` | **Sem alteração.** Os erros `WEBHOOK_*` são `AppError` e saem como `{ error: { code, message, details } }`. `ZodError` e `P2002`/`P2025` do Prisma já estão cobertos ([09:29] Bruno). |
 | FDD-INT-05 | `src/middlewares/auth.middleware.ts` | O router de webhooks usa `router.use(authenticate)`, como `order.routes.ts`. O router admin acrescenta `requireRole('ADMIN')`, como `src/modules/users/user.routes.ts` ([09:36] Larissa). `req.user.id` alimenta `replayedById`. |
 | FDD-INT-06 | `src/middlewares/validate.middleware.ts` | Os schemas de `webhook.schemas.ts` são aplicados com `validate({ body, params, query })`. Atenção: o middleware converte qualquer `ZodError` em `VALIDATION_ERROR` (ver FDD-ERR-02). |
-| FDD-INT-07 | `src/routes/index.ts` e `src/app.ts` | Em `Controllers`, acrescentar `webhooks` e `webhooksAdmin`. Em `buildApiRouter`: `router.use('/webhooks', buildWebhookRouter(...))`, `router.use('/admin/webhooks', buildWebhookAdminRouter(...))` e `router.use('/customers/:customerId/webhooks', buildCustomerWebhookRouter(...))` (este com `Router({ mergeParams: true })`, registrado **antes** de `/customers` para não passar pelo router de customers). Em `buildControllers`: instanciar `WebhookRepository` → `WebhookService` → `WebhookController`. |
+| FDD-INT-07 | `src/routes/index.ts` e `src/app.ts` | Em `Controllers`, acrescentar `webhooks` e `webhooksAdmin`. Em `buildApiRouter`: `router.use('/webhooks', buildWebhookRouter(...))` e `router.use('/admin/webhooks', buildWebhookAdminRouter(...))`. Em `buildControllers`: instanciar `WebhookRepository` → `WebhookService` → `WebhookController`. |
 | FDD-INT-08 | `src/server.ts` e `src/config/database.ts` | `src/worker.ts` (novo) segue a estrutura do `bootstrap()` de `src/server.ts` (log de start, handlers de `SIGINT`/`SIGTERM`, `$disconnect`), mas **não** sobe o Express. Cria um `PrismaClient` próprio com `createPrismaClient()` ([09:30] Bruno). |
 | FDD-INT-09 | `src/config/env.ts` | Acrescentar as chaves `WEBHOOK_*` opcionais (§8) ao `envSchema`. `DATABASE_URL` é a mesma ([09:30] Bruno). |
 | FDD-INT-10 | `src/shared/logger/index.ts` | Reuso do `logger` nos dois processos. Acrescentar caminhos de secret a `redactPaths` (§9.1). |
@@ -643,6 +632,8 @@ Sem biblioteca de tracing. A **correlação** é feita por:
 | FDD-RSK-06 | Cliente não deduplica e processa duas vezes | Média | Médio | `X-Event-Id` estável e destaque no portal ([09:26] Marcos) |
 | FDD-RSK-07 | Crescimento contínuo de `webhook_outbox`/`webhook_deliveries`, que guarda payload e resposta de cada tentativa | Alta (a prazo) | Baixo | Arquivamento já previsto como trabalho futuro ([09:08] Diego). Monitorar o tamanho das tabelas. Avaliar na revisão um limite para o `responseBody` guardado |
 | FDD-RSK-08 | Envio de muitas chamadas em rajada para um cliente | Média | Médio | Métrica por endpoint. Decisão adiada (RFC-QA-01) |
+| FDD-RSK-09 | Um cliente lento ou fora do ar prende o processamento dos demais (o argumento de [09:04] Bruno aplicado ao worker) | Média | Alto | Cadeias independentes por endpoint, sem esperar o ciclo (§5.2 passo 4). A concorrência entre endpoints distintos é ilimitada, o que pode exigir um teto se houver muitos clientes. Validar na revisão (RFC-QA-11) |
+| FDD-RSK-10 | Qualquer usuário autenticado rotaciona a secret ou lê o histórico de qualquer customer (§6.10) | Média | Alto | Seguir a decisão literal da reunião e levar o ponto à revisão da Sofia (RFC-QA-04, RFC-QA-08) |
 
 ## 13. Critérios de aceite técnicos
 
@@ -660,3 +651,4 @@ Sem biblioteca de tracing. A **correlação** é feita por:
 | FDD-AC-10 | `GET /webhooks/:id/deliveries` retorna no máximo 100 itens, do mais recente para o mais antigo, com `success`, `responseStatus`, `durationMs`, `requestPayload` e `responseBody` |
 | FDD-AC-11 | Matar o worker com linhas em `PROCESSING` e reiniciar faz essas linhas voltarem a `PENDING` e serem entregues |
 | FDD-AC-12 | Os testes existentes (`tests/orders.test.ts`, `tests/auth.test.ts`) continuam passando sem alteração além do `tests/setup.ts` |
+| FDD-AC-13 | Com um endpoint que sempre expira (10s) e outro que responde 200, o evento do segundo é entregue em até ~2s + envio, sem esperar o primeiro |

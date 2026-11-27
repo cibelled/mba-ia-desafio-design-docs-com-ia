@@ -14,7 +14,7 @@
 
 O OMS vai **notificar automaticamente os sistemas dos clientes B2B sempre que o status de um pedido mudar**, enviando uma chamada HTTP (webhook) para uma URL cadastrada pelo cliente. Isso substitui a prática atual dos clientes de consultar a API de tempos em tempos para descobrir se algo mudou ([09:00] Marcos).
 
-Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de vida do pedido (`PENDING → PAID → PROCESSING → SHIPPED → DELIVERED`, além de `CANCELLED`) já é controlado e auditado, como mostra `src/modules/orders/order.status.ts`. O que falta é avisar quem está fora.
+Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de vida do pedido (`PENDING → PAID → PROCESSING → SHIPPED → DELIVERED`, além de `CANCELLED`) já é controlado e auditado. O que falta é avisar quem está fora.
 
 ## 2. Problema e motivação
 
@@ -43,7 +43,7 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-MET-01 | Notificar "em tempo real" na percepção do cliente | Tempo entre a mudança de status e a primeira tentativa de entrega (p95) | **< 10 segundos** | [09:02] Marcos |
 | PRD-MET-02 | Atender os clientes que fizeram o pedido formal | Clientes com webhook ativo em produção | **3 de 3** (Atlas, MaxDistribuição, Nova Cargo) até o prazo de fim de novembro | [09:00] Marcos, [09:45] Marcos |
 | PRD-MET-03 | Nenhuma mudança de status sem notificação | Transições de pedidos com webhook interessado que não geraram evento | **0** | [09:40] Bruno |
-| PRD-MET-04 | Tolerar indisponibilidade do cliente | Janela de retentativas antes de desistir | **~15 horas** (5 retentativas) | [09:17] Diego, [09:17] Marcos |
+| PRD-MET-04 | Tolerar indisponibilidade do cliente | Janela de retentativas antes de desistir | **~15 horas** ("5 tentativas"; a leitura 1 envio + 5 retentativas está em confirmação, RFC-QA-06) | [09:17] Diego, [09:17] Marcos |
 | PRD-MET-05 | Reduzir o polling dos clientes em `GET /orders` | Requisições de listagem dos 3 clientes antes e depois | Tendência de queda. A reunião não fixou meta numérica, então a linha de base ainda precisa ser medida | [09:00] Marcos |
 
 ## 5. Escopo
@@ -82,10 +82,10 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-FR-06 | O cliente deve poder **solicitar uma nova secret** pela API. A anterior continua válida por **24 horas** | [09:21] Sofia |
 | PRD-FR-07 | Cada notificação deve permitir ao cliente **verificar a origem e a integridade** por assinatura | [09:19] Sofia, [09:20] Sofia |
 | PRD-FR-08 | Cada notificação leva um **identificador único de evento**, para o cliente descartar duplicatas | [09:25] Diego |
-| PRD-FR-09 | Notificações que falham devem ser **retentadas automaticamente** com intervalos crescentes (1m, 5m, 30m, 2h, 12h), cobrindo uma janela de ~15h. A reunião fala em "5 tentativas" ([09:48]: "total 5 tentativas"), mas os 5 intervalos implicam envio inicial + 5 retentativas. A leitura adotada está pendente de confirmação ([RFC-QA-06](RFC.md#5-questões-em-aberto)) | [09:15] Diego, [09:17] Larissa, [09:48] Larissa |
+| PRD-FR-09 | Notificações que falham devem ser **retentadas automaticamente** com intervalos crescentes, num total de "5 tentativas" ([09:17], [09:48] Larissa). A leitura exata (1 envio + 5 retentativas ou 5 envios no total) está em confirmação, RFC-QA-06 | [09:15] Diego, [09:17] Larissa |
 | PRD-FR-10 | Depois de esgotar as tentativas, a notificação vai para uma **fila de falhas (DLQ)**, com payload, motivo e horário | [09:18] Diego |
 | PRD-FR-11 | Um usuário **ADMIN** deve poder **reprocessar** uma notificação da DLQ, e a ação fica registrada com o autor | [09:18] Diego, [09:36] Sofia |
-| PRD-FR-12 | O cliente deve poder consultar o **histórico de entregas** de um webhook (últimas 100), com sucesso/falha, payload, resposta e tempo de resposta | [09:34] Marcos |
+| PRD-FR-12 | O cliente deve poder consultar o **histórico de entregas** de um webhook (o Marcos deu "os últimos 100" como exemplo), com sucesso/falha, payload, resposta e tempo de resposta | [09:34] Marcos |
 | PRD-FR-13 | A notificação deve trazer dados resumidos do pedido (identificação, status anterior e novo, cliente, total) e não os itens | [09:43] Diego |
 | PRD-FR-14 | A notificação deve refletir o pedido **no momento da mudança**, mesmo que ele mude depois | [09:52] Larissa |
 | PRD-FR-15 | Cada notificação informa **qual webhook cadastrado** a originou, para clientes com vários endpoints | [09:44] Sofia |
@@ -111,7 +111,7 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | Decisão | Trade-off aceito | Detalhe |
 |---|---|---|
 | Notificação assíncrona via outbox no banco atual | Latência mínima de ~2s em troca de nunca travar a operação nem subir infra nova | [ADR-001](adrs/ADR-001-outbox-no-mysql.md), [ADR-002](adrs/ADR-002-worker-separado-em-polling.md) |
-| 5 retentativas em ~15h e depois DLQ | Uma notificação pode chegar com até ~15h de atraso. Depois disso, o reprocessamento é manual | [ADR-003](adrs/ADR-003-retry-backoff-exponencial-e-dlq.md) |
+| "5 tentativas" em ~15h e depois DLQ | Uma notificação pode chegar com até ~15h de atraso. Depois disso, o reprocessamento é manual | [ADR-003](adrs/ADR-003-retry-backoff-exponencial-e-dlq.md) |
 | HMAC por webhook com rotação de 24h | Mais complexidade para o cliente validar, em troca de segurança e de recuperação em caso de vazamento | [ADR-004](adrs/ADR-004-hmac-sha256-com-secret-por-endpoint.md) |
 | At-least-once em vez de exactly-once | O cliente precisa deduplicar, em troca de uma solução simples e padrão de mercado | [ADR-005](adrs/ADR-005-at-least-once-com-x-event-id.md) |
 | Notificação enxuta, sem itens | O cliente que precisa de detalhes faz uma chamada extra | [ADR-007](adrs/ADR-007-payload-snapshot-na-insercao.md) |
@@ -136,6 +136,7 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-RSK-04 | **Cliente fora do ar por mais de ~15h** perde notificações automáticas | Baixa | Médio | DLQ e reprocessamento manual por ADMIN. O aviso por e-mail fica para a próxima fase ([09:17] Marcos, [09:37] Larissa) |
 | PRD-RSK-05 | **Rajada de notificações** sobrecarrega o endpoint do cliente | Média | Médio | Monitorar o volume por webhook e decidir sobre rate limiting depois ([09:39] Diego) |
 | PRD-RSK-06 | **Atraso na revisão de segurança** empurra o deploy | Média | Médio | Reservar os 2 dias úteis da Sofia no planejamento da sprint 3 ([09:46] Sofia, [09:47] Larissa) |
+| PRD-RSK-07 | **Estimativa de 3 sprints apertada:** as partes citadas somam 3 sprints mais "um pouco", e a Larissa fechou em 3 contando a revisão da Sofia. A data da reunião e a duração do sprint não constam da transcrição, então não dá para checar o prazo de "fim de novembro" | Média | Alto | Confirmar a duração do sprint e o prazo com a Atlas antes de assumir a data, e proteger o escopo enxuto (RFC-QA-12) ([09:46] Larissa, [09:45] Marcos) |
 
 ## 11. Critérios de aceitação
 
@@ -146,15 +147,15 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-AC-03 | Cadastrar um webhook com URL `http://` é recusado com erro de validação |
 | PRD-AC-04 | O cliente consegue validar a assinatura de toda notificação com a secret recebida no cadastro |
 | PRD-AC-05 | Depois de uma rotação, notificações assinadas continuam válidas para a secret antiga durante 24h, e só para a nova depois disso |
-| PRD-AC-06 | Com o endpoint fora do ar, a notificação é retentada nos intervalos 1m/5m/30m/2h/12h (~15h) e depois aparece na DLQ. O número exato de envios depende de RFC-QA-06 |
+| PRD-AC-06 | Com o endpoint fora do ar, a notificação é retentada com intervalos crescentes ao longo de ~15h (5 tentativas, leitura em RFC-QA-06) e depois aparece na DLQ |
 | PRD-AC-07 | Só um ADMIN consegue reprocessar uma notificação da DLQ, e o autor fica registrado |
-| PRD-AC-08 | O histórico de entregas mostra as últimas 100 tentativas, com sucesso/falha, payload, resposta e tempo |
+| PRD-AC-08 | O histórico de entregas mostra as tentativas mais recentes (até 100, valor a confirmar), com sucesso/falha, payload, resposta e tempo |
 | PRD-AC-09 | Se o registro da notificação falhar, a mudança de status do pedido também é desfeita |
 
 ## 12. Estratégia de testes e validação
 
-- **Testes de integração automatizados**, no padrão de `tests/orders.test.ts` (Vitest + Supertest, banco real), cobrindo CRUD, validação de URL, permissão de ADMIN no replay e inserção na outbox dentro do `changeStatus`. O detalhe por critério está no [FDD §13](FDD.md#13-critérios-de-aceite-técnicos).
+- **Testes de integração automatizados**, no mesmo padrão dos testes de pedidos já existentes, cobrindo CRUD, validação de URL, permissão de ADMIN no replay e inserção na outbox dentro do `changeStatus`. O detalhe por critério está no [FDD §13](FDD.md#13-critérios-de-aceite-técnicos).
 - **Testes do worker com endpoint falso e relógio controlado**, para validar backoff, timeout, DLQ e limite de 64KB sem esperar 15h.
-- **Teste ponta a ponta** com a integração no `order.service` (meia sprint reservada, [09:46] Larissa).
+- **Teste ponta a ponta** da integração com a mudança de status do pedido (meia sprint reservada, [09:46] Larissa).
 - **Revisão de segurança da Sofia** sobre assinatura e geração de secret antes do deploy ([09:46] Sofia).
 - **Validação com clientes reais:** acompanhar a ativação dos 3 clientes (PRD-MET-02) e a latência p95 (PRD-MET-01) nos primeiros dias em produção.

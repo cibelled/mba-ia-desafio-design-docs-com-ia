@@ -28,7 +28,7 @@ Já houve caso de cliente que vazou uma secret no log da própria aplicação ([
 | Alternativa | Por que foi descartada |
 |---|---|
 | **Secret global da plataforma** | Se vaza uma, vaza tudo ([09:21] Sofia). |
-| **Rotação sem período de carência** (troca imediata) | Alternativa plausível, implícita na exigência da Sofia. Foi descartada porque o cliente precisa de tempo para migrar os próprios sistemas, daí as 24h em paralelo ([09:21] Sofia). |
+| **Rotação sem período de carência** (troca imediata) | *Alternativa não discutida na reunião; incluída por ser plausível.* Foi descartada porque o cliente precisa de tempo para migrar os próprios sistemas, daí as 24h em paralelo ([09:21] Sofia). |
 
 ## Consequências
 

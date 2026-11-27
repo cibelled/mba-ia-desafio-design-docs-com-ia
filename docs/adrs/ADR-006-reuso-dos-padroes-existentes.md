@@ -30,8 +30,8 @@ Uma feature nova pode seguir esse padrão ou trazer estruturas próprias (filas,
 
 **Reuso máximo do que já existe. Webhooks será um módulo igual aos outros** ([09:30] Larissa):
 
-- Pasta `src/modules/webhooks/` com `webhook.controller.ts`, `webhook.service.ts`, `webhook.repository.ts`, `webhook.routes.ts` e `webhook.schemas.ts` (novos), além de `webhook.processor.ts` (novo) com a lógica do worker ([09:27] Bruno, [09:28] Bruno).
-- Erros novos estendem `AppError` ou as subclasses de `src/shared/errors/http-errors.ts`, com **prefixo `WEBHOOK_`** em todos os códigos do módulo (ex.: `WEBHOOK_NOT_FOUND`, `WEBHOOK_INVALID_URL`, `WEBHOOK_SECRET_REQUIRED`) ([09:28] Bruno, [09:29] Larissa).
+- Pasta `src/modules/webhooks/` com `webhook.controller.ts`, `webhook.service.ts`, `webhook.repository.ts`, `webhook.routes.ts` e `webhook.schemas.ts` (novos), além de `webhook.processor.ts` (novo) com a lógica do worker ([09:27] Bruno, [09:28] Bruno). O FDD acrescenta arquivos de apoio (`webhook.errors.ts`, `webhook.publisher.ts`, `webhook.signature.ts` e as rotas de admin), todos dentro do mesmo módulo.
+- Erros novos estendem `AppError` ou as subclasses de `src/shared/errors/http-errors.ts`, com **prefixo `WEBHOOK_`** em todos os códigos do módulo (ex.: `WEBHOOK_NOT_FOUND`, `WEBHOOK_INVALID_URL`, `WEBHOOK_SECRET_REQUIRED`) ([09:28] Bruno, [09:29] Larissa). Observação: `WEBHOOK_INVALID_URL` nasce de um schema Zod, e o `validate.middleware.ts` converte todo `ZodError` em `VALIDATION_ERROR`, então esse código aparece só em `details[].message` da resposta (detalhe no FDD §7).
 - Os erros chegam ao `errorMiddleware` **sem nenhuma alteração** no middleware ([09:29] Bruno).
 - Log só com o Pino existente (`logger` de `src/shared/logger/index.ts`), **sem biblioteca nova** ([09:29] Bruno).
 - O replay admin reaproveita `requireRole('ADMIN')`, como já faz `src/modules/users/user.routes.ts` ([09:36] Larissa).
