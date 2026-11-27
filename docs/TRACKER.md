@@ -155,7 +155,7 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-OBS-01 | `docs/FDD.md` | Observabilidade | Logs estruturados via Pino existente, sem lib nova | TRANSCRICAO | [09:29] Bruno |
 | FDD-OBS-01b | `docs/FDD.md` | Observabilidade | Redaction de secret motivada por vazamento em log | TRANSCRICAO | [09:22] Diego |
 | FDD-OBS-01c | `docs/FDD.md` | Observabilidade | Log de auditoria do replay com adminUserId | TRANSCRICAO | [09:36] Sofia |
-| FDD-OBS-02 | `docs/FDD.md` | Observabilidade | Métrica de lag p95 < 10s | TRANSCRICAO | [09:02] Marcos |
+| FDD-OBS-02 | `docs/FDD.md` | Observabilidade | Métrica de lag < 10s até a 1ª tentativa (uso do p95 é proposta, §8.1) | TRANSCRICAO | [09:02] Marcos |
 | FDD-OBS-02b | `docs/FDD.md` | Observabilidade | Métrica de volume por endpoint para decidir rate limiting | TRANSCRICAO | [09:38] Diego |
 | FDD-OBS-03 | `docs/FDD.md` | Observabilidade | Correlação pelo X-Request-Id existente e por orderId/eventId nos logs | CODIGO | `src/middlewares/request-logger.middleware.ts` |
 | FDD-INT-01 | `docs/FDD.md` | Integração | changeStatus chama publishWebhookEvent(tx, order, from, to) | CODIGO | `src/modules/orders/order.service.ts` |

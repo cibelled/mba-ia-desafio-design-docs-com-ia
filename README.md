@@ -12,9 +12,9 @@ O ponto central não era "gerar documentos", e sim **filtrar**. A reunião tem d
 
 | Ferramenta | Papel |
 |---|---|
-| **Claude (Opus 5.5 e, no final, Sonnet 5.5) no Claude Code, em modo agente** | Ferramenta única de produção. Clonou o repositório base, leu a transcrição e o código (`order.service.ts`, `order.status.ts`, `schema.prisma`, middlewares, erros, logger, rotas, testes), escreveu ADRs, RFC, FDD, PRD, tracker e README, e fez a revisão de cada documento contra a transcrição. Também aplicou os arquivos no meu clone local e fez o commit |
+| **Claude (Opus 5.5 e, no final, Sonnet 5.5) no Claude Code, em modo agente** | Ferramenta única de produção. Clonou o repositório base, leu a transcrição e o código (`order.service.ts`, `order.status.ts`, `schema.prisma`, middlewares, erros, logger, rotas, testes), escreveu ADRs, RFC, FDD, PRD, tracker e README, e fez a revisão de cada documento contra a transcrição. Também aplicou os arquivos no meu clone local, fez os commits e o push. Numa sessão separada, validou o pacote critério a critério contra o enunciado (rodada 4) e conferiu as correções da revisão independente |
 | **Dois subagentes revisores do Claude Code** | Revisão independente, sem editar arquivos. Um **revisor adversarial** leu transcrição, código e todos os documentos procurando contradições, itens inventados e erros técnicos. Um **classificador** leu só a transcrição, sem ver os documentos, e eu comparei o resultado dele com o que tinha escrito |
-| **Script Python de validação** (escrito pelo Claude durante a sessão) | Checagem anti-alucinação: confere se cada `[hh:mm] Falante` citado existe na transcrição, se cada caminho de código existe no repositório (ou está marcado como `(novo)`), se todos os IDs dos documentos estão no tracker e se a proporção TRANSCRICAO/CODIGO atende aos critérios. O script gera o `TRACKER.md` a partir de uma lista estruturada |
+| **Script Python de validação** (escrito pelo Claude durante a sessão) | Checagem anti-alucinação: confere se cada `[hh:mm] Falante` citado existe na transcrição, se cada caminho de código existe no repositório (ou está marcado como `(novo)`), se todos os IDs dos documentos estão no tracker e se a proporção TRANSCRICAO/CODIGO atende aos critérios. A primeira versão do `TRACKER.md` foi gerada pelo script a partir de uma lista estruturada. Nas rodadas seguintes, as linhas novas foram editadas à mão e o script rodou de novo para revalidar o arquivo |
 
 ## Workflow adotado
 
@@ -25,7 +25,7 @@ Eu entreguei ao Claude o enunciado completo e pedi que ele produzisse o pacote i
 3. **RFC**, consolidando os ADRs em nível de arquitetura. Alternativas descartadas e questões em aberto entraram em tabelas com ID e timestamp.
 4. **FDD**, com modelo de dados Prisma, fluxos, contratos HTTP com exemplos, matriz `WEBHOOK_*`, resiliência, observabilidade e a seção de integração arquivo por arquivo.
 5. **PRD por último**, como consolidação de produto, sem repetir o detalhe técnico do FDD.
-6. **Tracker** gerado por script a partir de uma lista (ID, documento, tipo, resumo, fonte, localização), com validação automática.
+6. **Tracker**, primeiro gerado por script a partir de uma lista (ID, documento, tipo, resumo, fonte, localização) e depois mantido à mão a cada rodada, sempre revalidado pelo script.
 7. **Revisão e correções** a partir do validador e de uma releitura contra a transcrição.
 8. **Revisão independente** com dois subagentes (um adversarial, um classificador), seguida de uma nova rodada de correções (ver abaixo).
 
@@ -33,7 +33,7 @@ Para evitar conteúdo duplicado, a regra foi: o **RFC** fala em decisão, o **FD
 
 ## Prompts customizados
 
-A conversa foi conduzida com o enunciado do desafio colado na íntegra, seguido de instruções curtas, como pedir que o Claude gerasse tudo no próprio ambiente (e não só prompts para eu rodar). Abaixo estão os dois prompts de direcionamento que descrevem, em forma reutilizável, as instruções que guiaram a produção. Foram formalizados depois da execução, a partir do que o Claude fez, e não digitados um a um durante a sessão.
+A conversa foi conduzida com o enunciado do desafio colado na íntegra, seguido de instruções curtas, como pedir que o Claude gerasse tudo no próprio ambiente (e não só prompts para eu rodar). Abaixo estão os dois prompts de direcionamento que descrevem, em forma reutilizável, as instruções que guiaram a produção. Os prompts 1 e 2 foram formalizados depois da execução, a partir do que o Claude fez, e não digitados um a um durante a sessão. O prompt 3 é um prompt real, usado do jeito que está, e foi ele que disparou a rodada 4 de correções.
 
 **Prompt 1: filtragem dirigida da transcrição** (antes de escrever qualquer documento)
 
@@ -70,9 +70,19 @@ Restrições:
   discutiu mas que decorre da decisão (ex.: impacto no ordering), sinalizado como tal.
 ```
 
+**Prompt 3: revisão crítica contra os critérios de aceite** (prompt real, numa sessão nova)
+
+```text
+valide o codigo neste repo com essa especificacao
+
+<enunciado completo do desafio colado, incluindo a seção "Critérios de Aceite">
+```
+
+O Claude respondeu com um checklist critério a critério e uma lista de achados (rota com `customerId` em query, conflito com "total 5 tentativas", contratos incompletos). Em seguida, usei dois comandos curtos: `quero aplique e atualize`, para aplicar as correções e atualizar o tracker, e `faz o commit e o push`.
+
 ## Iterações e ajustes
 
-O pacote passou por **6 rodadas**: a geração inicial, 3 rodadas de autocorreção, 1 rodada de revisão final contra os critérios de aceite (pedida por mim ao Claude) e 1 rodada de **revisão independente** por dois subagentes, que gerou 22 achados e mais de uma dezena de correções. Os ajustes concretos:
+O pacote passou por **7 rodadas**: a geração inicial, 3 rodadas de autocorreção, 1 rodada de revisão final contra os critérios de aceite (pedida por mim ao Claude), 1 rodada de **revisão independente** por dois subagentes, que gerou 22 achados e mais de uma dezena de correções, e 1 conferência final dessas correções. Os ajustes concretos:
 
 **Rodadas 1 a 3 (autocorreção)**
 
@@ -107,6 +117,10 @@ Um revisor adversarial (somente leitura) e um classificador que só lia a transc
 O classificador independente concordou com os documentos em decisões, descartes e adiamentos, e ajudou a pegar os pontos 16 e 18.
 
 **Ponto que eu rejeitei.** Pensei em tornar o worker paralelo entre pedidos. Não fiz, porque a reunião decidiu um único worker ([09:12] e [09:13]). A solução adotada mantém um único processo e só isola endpoints dentro dele.
+
+**Rodada 6 (conferência das correções da revisão independente)**
+
+20. **A própria correção trazia um bug e ficou incompleta.** O worker com cadeias por endpoint reservava o lote inteiro como `PROCESSING` antes de agrupar, e eventos de um endpoint com cadeia em andamento ficariam presos até um restart. A seleção do lote passou a excluir esses endpoints. A conferência também achou o domínio real do cliente ainda em quatro exemplos do FDD, `secretRotationExpiresAt` não unificado na resposta do PATCH e um erro de digitação no §9.3. Todos foram corrigidos.
 
 ## Como navegar a entrega
 

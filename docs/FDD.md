@@ -181,9 +181,9 @@ sequenceDiagram
 Executado por `src/modules/webhooks/webhook.processor.ts` (novo), disparado por `src/worker.ts` (novo) a cada `WEBHOOK_POLL_INTERVAL_MS` (padrão **2000**, [09:09] Diego). O Bruno deixou em aberto o nome do arquivo (`webhook.worker.ts` ou `webhook.processor.ts`, [09:28] Bruno); este FDD adota `webhook.processor.ts`.
 
 1. **Recuperação no startup:** linhas em `PROCESSING` voltam para `PENDING`. Como há um único worker ([09:12] Diego), qualquer `PROCESSING` no boot é resto de um processo que morreu no meio de um ciclo.
-2. **Seleção do lote:** busca linhas com `status IN (PENDING, FAILED)` e `nextAttemptAt <= now()`, ordenadas por `createdAt ASC`, com `take = WEBHOOK_BATCH_SIZE` ("batch pequeno", [09:08] Diego; o valor 20 é sugestão, ver §8.1).
-3. **Reserva:** `updateMany` para `PROCESSING` usando os ids do lote.
-4. **Agrupamento por endpoint (proposta, ver RFC-QA-11).** O lote é agrupado por `webhookId`. Cada grupo roda como uma cadeia assíncrona própria, **em ordem de `createdAt`**. O worker guarda o conjunto de `webhookId` com cadeia em andamento e **não inicia outra cadeia para o mesmo endpoint**. Assim, um cliente lento ou fora do ar prende só a própria cadeia, e os eventos dos outros clientes seguem no próximo ciclo de 2s. O ciclo **não espera** as cadeias terminarem. Isso preserva o argumento de [09:04] Bruno (cliente lento não trava os outros) dentro do worker e continua sendo um único processo, como decidido ([09:12] Diego).
+2. **Seleção do lote:** busca linhas com `status IN (PENDING, FAILED)`, `nextAttemptAt <= now()` e **`webhookId NOT IN (endpoints com cadeia em andamento)`** (ver passo 4), ordenadas por `createdAt ASC`, com `take = WEBHOOK_BATCH_SIZE` ("batch pequeno", [09:08] Diego; o valor 20 é sugestão, ver §8.1). A exclusão é obrigatória. Sem ela, um evento de um endpoint ocupado seria reservado no passo 3 e nunca entraria numa cadeia, ficando preso em `PROCESSING` até o worker reiniciar.
+3. **Reserva:** `updateMany` para `PROCESSING` usando os ids do lote. Toda linha reservada entra numa cadeia no passo 4 no mesmo ciclo.
+4. **Agrupamento por endpoint (proposta, ver RFC-QA-11).** O lote é agrupado por `webhookId`. Cada grupo roda como uma cadeia assíncrona própria, **em ordem de `createdAt`**. O worker guarda em memória o conjunto de `webhookId` com cadeia em andamento. Esse conjunto alimenta o filtro do passo 2, então um mesmo endpoint **nunca tem duas cadeias ao mesmo tempo**. O `webhookId` sai do conjunto quando a cadeia termina, com sucesso ou falha. Assim, um cliente lento ou fora do ar prende só a própria cadeia, e os eventos dos outros clientes seguem no próximo ciclo de 2s. O ciclo **não espera** as cadeias terminarem. Isso preserva o argumento de [09:04] Bruno (cliente lento não trava os outros) dentro do worker e continua sendo um único processo, como decidido ([09:12] Diego).
 5. **Para cada evento da cadeia**, dentro de um `try/catch` próprio:
    1. carrega o `WebhookEndpoint`. Se está `active=false` ou foi removido, a linha vai para a DLQ com o motivo `WEBHOOK_ENDPOINT_INACTIVE`, sem enviar;
    2. serializa o `payload` com `JSON.stringify`. Se `Buffer.byteLength > 65536`, vai para a DLQ com `WEBHOOK_PAYLOAD_TOO_LARGE`, **sem retry e sem envio** ([09:23] Sofia, [09:24] Diego);
@@ -266,7 +266,7 @@ Content-Type: application/json
 {
   "id": "0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f",
   "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
-  "url": "https://hooks.atlascomercial.com.br/oms/orders",
+  "url": "https://hooks.example.com/oms/orders",
   "events": ["SHIPPED", "DELIVERED"],
   "active": true,
   "secret": "9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7",
@@ -314,7 +314,7 @@ Authorization: Bearer eyJhbGciOi...
     {
       "id": "0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f",
       "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
-      "url": "https://hooks.atlascomercial.com.br/oms/orders",
+      "url": "https://hooks.example.com/oms/orders",
       "events": ["SHIPPED", "DELIVERED"],
       "active": true,
       "previousSecretExpiresAt": null,
@@ -349,10 +349,10 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 {
   "id": "0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f",
   "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
-  "url": "https://hooks.atlascomercial.com.br/oms/orders",
+  "url": "https://hooks.example.com/oms/orders",
   "events": ["PAID", "SHIPPED", "DELIVERED"],
   "active": true,
-  "secretRotationExpiresAt": null,
+  "previousSecretExpiresAt": null,
   "createdAt": "2026-11-26T12:00:00.000Z",
   "updatedAt": "2026-11-26T14:10:00.000Z"
 }
@@ -482,7 +482,7 @@ Authorization: Bearer eyJhbGciOi...
 ### 6.8 [FDD-CONTRATO-08] Contrato outbound: requisição enviada ao cliente ([09:43]–[09:45])
 
 ```http
-POST https://hooks.atlascomercial.com.br/oms/orders
+POST https://hooks.example.com/oms/orders
 Content-Type: application/json
 X-Event-Id: 5d1e7c2b-9a8f-4b6e-a3d2-1c0b9a8f7e6d
 X-Webhook-Id: 0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f
@@ -628,7 +628,7 @@ A reunião decidiu **não adicionar ferramentas novas** ([09:29] Bruno, [09:30] 
 
 Sem biblioteca de tracing. A **correlação** é feita por:
 - **`eventId`** como chave de rastreio ponta a ponta: aparece em todos os logs do evento (enfileiramento, cada tentativa, DLQ, replay), nas tabelas e no header `X-Event-Id` que o cliente recebe. O suporte consegue cruzar com os logs do cliente.
-- **Não** se propõe nenhuma mudança na assinatura de `changeStatus` para propagar o `requestId` (isso exigiria alterar `order.controller.ts` e `order.service.ts` além do previsto). O `X-Request-Id` existente (`src/middlewares/request-logger.middleware.ts`) continua identificando a requisição HTTP nos logs da API, A ligação entre a requisição que mudou o status e o evento é feita por `orderId`, `toStatus` e horário no log `webhook_event_enqueued`. Uma correlação direta por `requestId` fica como melhoria futura.
+- **Não** se propõe nenhuma mudança na assinatura de `changeStatus` para propagar o `requestId` (isso exigiria alterar `order.controller.ts` e `order.service.ts` além do previsto). O `X-Request-Id` existente (`src/middlewares/request-logger.middleware.ts`) continua identificando a requisição HTTP nos logs da API. A ligação entre a requisição que mudou o status e o evento é feita por `orderId`, `toStatus` e horário no log `webhook_event_enqueued`. Uma correlação direta por `requestId` fica como melhoria futura.
 - Distributed tracing (OpenTelemetry) fica fora desta fase pela decisão de não adicionar libs, e pode ser reavaliado depois.
 
 ---
