@@ -68,7 +68,7 @@ Restrições:
 
 ## Iterações e ajustes
 
-O pacote foi gerado em uma primeira passada e depois passou por **3 rodadas de correção**. Os ajustes concretos:
+O pacote foi gerado em uma primeira passada e depois passou por **4 rodadas de correção**. Os ajustes concretos:
 
 1. **Atribuições inventadas no PRD.** Os cenários de uso citavam clientes pelo nome ("a Nova Cargo fica 2h fora do ar", "a MaxDistribuição vaza a secret"). A transcrição só diz "já tinha cliente nosso" com esses problemas ([09:16] e [09:22] Diego), sem nomear ninguém. Troquei por "um cliente".
 2. **Números sem origem no FDD.** A primeira versão trazia um truncamento de `responseBody` em 2KB e um lote padrão de 20 eventos como se fossem fatos. Nenhum dos dois tinha "Localização" na transcrição. O truncamento foi removido e virou ponto de atenção no risco FDD-RSK-07. O lote ficou como "padrão sugerido, a validar", ancorado no "batch pequeno" de [09:08] Diego.
@@ -76,6 +76,7 @@ O pacote foi gerado em uma primeira passada e depois passou por **3 rodadas de c
 4. **Formato do ADR.** Os ADRs começaram com o Status como item de uma lista de metadados. Para atender ao critério de ter a *seção* Status, converti para um `## Status` em todos.
 5. **Questão em aberto descoberta no meio do caminho.** Ao escrever o FDD, percebi que só existe o endpoint de replay da DLQ, sem listagem para o ADMIN descobrir o `:id`. Acrescentei **RFC-QA-10** em vez de inventar um endpoint.
 6. **Convenção de nome de ADR.** `docs/adrs/README.md` sugeria `0001-titulo.md`, e o enunciado exige `ADR-NNN-titulo.md`. Segui o enunciado e transformei o README da pasta em índice.
+7. **Revisão final contra os critérios de aceite.** Pedi ao Claude que validasse o pacote inteiro contra o enunciado. Ele apontou três problemas, que foram corrigidos. (a) O FDD listava webhooks com `GET /webhooks?customerId=…`, só que a query não é nenhuma das opções faladas em [09:32] ("body ou path"). A rota virou `GET /customers/:customerId/webhooks`. (b) O RFC-QA-06 ignorava a fala "total 5 tentativas" do resumo de [09:48], que contradiz a leitura de 6 envios. O conflito passou a constar no RFC, no ADR-003, no FDD e no PRD. (c) Só um endpoint tinha exemplo completo de request e response. Todos ganharam bloco `http` com método, caminho e headers, e o PATCH ganhou a resposta em JSON. A data inventada no RFC também saiu.
 
 Dois pontos da transcrição foram tratados desde a primeira versão, sem retrabalho, mas valem registro porque são onde a IA mais poderia errar: o `customer_id` (o Marcos diz que vem do JWT em [09:31] e a Larissa corrige em [09:32]; a escolha entre body e path ficou como **RFC-QA-05**) e a conta das "5 tentativas" (os 5 intervalos somam ~14h36, o que só fecha com "quase 15 horas" se for 1 envio + 5 retentativas; ficou como **RFC-QA-06**).
 

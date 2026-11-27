@@ -82,7 +82,7 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-FR-06 | O cliente deve poder **solicitar uma nova secret** pela API. A anterior continua válida por **24 horas** | [09:21] Sofia |
 | PRD-FR-07 | Cada notificação deve permitir ao cliente **verificar a origem e a integridade** por assinatura | [09:19] Sofia, [09:20] Sofia |
 | PRD-FR-08 | Cada notificação leva um **identificador único de evento**, para o cliente descartar duplicatas | [09:25] Diego |
-| PRD-FR-09 | Notificações que falham devem ser **retentadas automaticamente** com intervalos crescentes, num total de 5 retentativas | [09:15] Diego, [09:17] Larissa |
+| PRD-FR-09 | Notificações que falham devem ser **retentadas automaticamente** com intervalos crescentes (1m, 5m, 30m, 2h, 12h), cobrindo uma janela de ~15h. A reunião fala em "5 tentativas" ([09:48]: "total 5 tentativas"), mas os 5 intervalos implicam envio inicial + 5 retentativas. A leitura adotada está pendente de confirmação ([RFC-QA-06](RFC.md#5-questões-em-aberto)) | [09:15] Diego, [09:17] Larissa, [09:48] Larissa |
 | PRD-FR-10 | Depois de esgotar as tentativas, a notificação vai para uma **fila de falhas (DLQ)**, com payload, motivo e horário | [09:18] Diego |
 | PRD-FR-11 | Um usuário **ADMIN** deve poder **reprocessar** uma notificação da DLQ, e a ação fica registrada com o autor | [09:18] Diego, [09:36] Sofia |
 | PRD-FR-12 | O cliente deve poder consultar o **histórico de entregas** de um webhook (últimas 100), com sucesso/falha, payload, resposta e tempo de resposta | [09:34] Marcos |
@@ -146,7 +146,7 @@ Hoje a plataforma não tem nenhum mecanismo de notificação externa. O ciclo de
 | PRD-AC-03 | Cadastrar um webhook com URL `http://` é recusado com erro de validação |
 | PRD-AC-04 | O cliente consegue validar a assinatura de toda notificação com a secret recebida no cadastro |
 | PRD-AC-05 | Depois de uma rotação, notificações assinadas continuam válidas para a secret antiga durante 24h, e só para a nova depois disso |
-| PRD-AC-06 | Com o endpoint fora do ar, a notificação é retentada 5 vezes ao longo de ~15h e depois aparece na DLQ |
+| PRD-AC-06 | Com o endpoint fora do ar, a notificação é retentada nos intervalos 1m/5m/30m/2h/12h (~15h) e depois aparece na DLQ. O número exato de envios depende de RFC-QA-06 |
 | PRD-AC-07 | Só um ADMIN consegue reprocessar uma notificação da DLQ, e o autor fica registrado |
 | PRD-AC-08 | O histórico de entregas mostra as últimas 100 tentativas, com sucesso/falha, payload, resposta e tempo |
 | PRD-AC-09 | Se o registro da notificação falhar, a mudança de status do pedido também é desfeita |
