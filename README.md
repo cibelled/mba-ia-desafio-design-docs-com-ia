@@ -12,26 +12,28 @@ O ponto central não era "gerar documentos", e sim **filtrar**. A reunião tem d
 
 | Ferramenta | Papel |
 |---|---|
-| **Claude (Opus 5.5) no claude.ai, em modo agente** | Ferramenta principal. Clonou o repositório base, leu a transcrição e o código (`order.service.ts`, `schema.prisma`, middlewares, erros, logger, testes), redigiu ADRs, RFC, FDD, PRD e README e fez a revisão crítica de cada documento contra a transcrição |
-| **Script Python de validação** (escrito pela IA, rodado no ambiente do agente) | Checagem automática anti-alucinação: confere se cada `[hh:mm] Falante` citado existe na transcrição, se cada caminho de código existe no repo (ou está marcado como `(novo)`), se todos os IDs dos documentos estão no tracker e se a proporção TRANSCRICAO/CODIGO bate com os critérios |
+| **Claude (Opus 5.5 e, no final, Sonnet 5.5) no Claude Code, em modo agente** | Ferramenta única de produção. Clonou o repositório base, leu a transcrição e o código (`order.service.ts`, `order.status.ts`, `schema.prisma`, middlewares, erros, logger, rotas, testes), escreveu ADRs, RFC, FDD, PRD, tracker e README, e fez a revisão de cada documento contra a transcrição. Também aplicou os arquivos no meu clone local e fez o commit |
+| **Script Python de validação** (escrito pelo Claude durante a sessão) | Checagem anti-alucinação: confere se cada `[hh:mm] Falante` citado existe na transcrição, se cada caminho de código existe no repositório (ou está marcado como `(novo)`), se todos os IDs dos documentos estão no tracker e se a proporção TRANSCRICAO/CODIGO atende aos critérios. O script gera o `TRACKER.md` a partir de uma lista estruturada |
 
 ## Workflow adotado
 
-Segui a ordem sugerida no enunciado, com uma etapa de mapeamento antes e uma de validação automática depois:
+Eu entreguei ao Claude o enunciado completo e pedi que ele produzisse o pacote inteiro. Ele seguiu a ordem sugerida, com uma etapa de mapeamento antes e uma de validação automática depois:
 
-1. **Exploração.** Leitura integral da `TRANSCRICAO.md` e dos arquivos centrais do código. A saída foi um mapa com as 6 decisões principais e seus timestamps, a lista do que foi descartado, adiado ou deixado em aberto, e as "armadilhas" (fala corrigida, ambiguidades, conflito de convenção de nome de ADR).
-2. **ADRs primeiro (7).** Uma decisão por arquivo no formato MADR, com as alternativas *realmente* faladas na reunião e o trade-off de cada uma.
-3. **RFC**, consolidando os ADRs em nível de arquitetura. As alternativas descartadas e as questões em aberto entraram em tabelas com ID e timestamp, e o RFC ficou propositalmente curto.
-4. **FDD**, com modelo de dados Prisma, fluxos, contratos HTTP com exemplos, matriz `WEBHOOK_*`, resiliência, observabilidade e a seção de integração apontando arquivo por arquivo.
-5. **PRD por último**, como consolidação de produto. Cuidei para não repetir o detalhe técnico do FDD.
-6. **Tracker** gerado a partir de uma lista estruturada (ID, documento, tipo, resumo, fonte, localização), com validação automática.
-7. **Revisão crítica e iteração.** O validador e uma leitura linha a linha contra a transcrição apontaram problemas, corrigidos em ciclos (ver abaixo).
+1. **Exploração.** Leitura integral da `TRANSCRICAO.md` e dos arquivos centrais do código. A saída foi um mapa com as 6 decisões principais e seus timestamps, o que foi descartado, adiado ou deixado em aberto, e as armadilhas (fala corrigida, ambiguidades, conflito de convenção de nome de ADR).
+2. **ADRs primeiro (7).** Uma decisão por arquivo no formato MADR, com as alternativas realmente faladas na reunião e o trade-off de cada uma.
+3. **RFC**, consolidando os ADRs em nível de arquitetura. Alternativas descartadas e questões em aberto entraram em tabelas com ID e timestamp.
+4. **FDD**, com modelo de dados Prisma, fluxos, contratos HTTP com exemplos, matriz `WEBHOOK_*`, resiliência, observabilidade e a seção de integração arquivo por arquivo.
+5. **PRD por último**, como consolidação de produto, sem repetir o detalhe técnico do FDD.
+6. **Tracker** gerado por script a partir de uma lista (ID, documento, tipo, resumo, fonte, localização), com validação automática.
+7. **Revisão e correções** a partir do validador e de uma releitura contra a transcrição (ver abaixo).
 
-Para não duplicar conteúdo, fixei uma regra para cada documento: o **RFC** fala em decisão ("o que e por quê"), o **FDD** em implementação ("como"), o **PRD** em produto, sem nomes de tabelas nem headers, e os **ADRs** trazem uma decisão cada. Quando um detalhe técnico aparecia no PRD ou no RFC, eu o trocava por um link para o FDD.
+Para evitar conteúdo duplicado, a regra foi: o **RFC** fala em decisão, o **FDD** em implementação, o **PRD** em produto (sem nomes de tabela nem headers) e cada **ADR** traz uma decisão. Detalhe técnico que aparecia no PRD ou no RFC virava um link para o FDD.
 
 ## Prompts customizados
 
-**Prompt 1: filtragem dirigida da transcrição** (usado antes de escrever qualquer documento)
+A conversa foi conduzida com o enunciado do desafio colado na íntegra, seguido de instruções curtas, como pedir que o Claude gerasse tudo no próprio ambiente (e não só prompts para eu rodar). Abaixo estão os dois prompts de direcionamento que descrevem, em forma reutilizável, as instruções que guiaram a produção. Foram formalizados depois da execução, a partir do que o Claude fez, e não digitados um a um durante a sessão.
+
+**Prompt 1: filtragem dirigida da transcrição** (antes de escrever qualquer documento)
 
 ```text
 Leia TRANSCRICAO.md inteira. NÃO gere documentos ainda. Produza 5 listas, cada item com
@@ -64,32 +66,18 @@ Restrições:
   discutiu mas que decorre da decisão (ex.: impacto no ordering), sinalizado como tal.
 ```
 
-**Prompt 3: revisão crítica contra o código** (rodado sobre o FDD já escrito)
-
-```text
-Revise docs/FDD.md como um engenheiro sênior do time de Pedidos que conhece o código.
-Para cada afirmação sobre o código existente, abra o arquivo e confirme. Procure:
-(a) comportamentos atribuídos a arquivos que não fazem aquilo;
-(b) códigos de erro que o pipeline atual não consegue emitir como descrito
-    (verifique validate.middleware.ts e http-errors.ts);
-(c) regras que conflitam entre si (ex.: um "erro" que, aplicado dentro da transação,
-    daria rollback na mudança de status);
-(d) números e defaults sem origem na transcrição.
-Liste os problemas com a correção proposta. Não reescreva o documento inteiro.
-```
-
 ## Iterações e ajustes
 
-Foram **4 ciclos principais** de geração → revisão → correção. Os ajustes mais relevantes:
+O pacote foi gerado em uma primeira passada e depois passou por **3 rodadas de correção**. Os ajustes concretos:
 
-1. **Atribuições inventadas no PRD.** A primeira versão dos cenários dizia que *"o endpoint da Nova Cargo fica 2h fora do ar"* e que *"a MaxDistribuição vaza a secret"*. A transcrição só diz que *"já tinha cliente nosso"* com esses problemas ([09:16] e [09:22] Diego), sem nomear ninguém. Troquei por "um cliente".
-2. **Números sem origem no FDD.** O primeiro FDD trazia um truncamento de `responseBody` em 2KB e um lote padrão de 20 eventos como se fossem fatos. Ao montar o tracker, nenhuma das duas linhas tinha "Localização". O truncamento foi removido e virou ponto de revisão no risco FDD-RSK-07. O lote ficou explicitamente como "padrão sugerido, a validar", apoiado no "batch pequeno" de [09:08] Diego.
-3. **Limite de 64KB no lugar errado.** A primeira versão validava o tamanho do payload na inserção da outbox. Como a inserção roda dentro da transação de `changeStatus`, um erro ali daria **rollback na mudança de status do pedido**, travando o negócio por causa de uma notificação. A validação foi para o worker: o evento vai direto para a DLQ com `WEBHOOK_PAYLOAD_TOO_LARGE`, sem retry.
-4. **Código de erro que o pipeline não emite.** O FDD previa uma resposta `WEBHOOK_INVALID_URL` direta. Lendo `src/middlewares/validate.middleware.ts`, vi que qualquer `ZodError` vira `VALIDATION_ERROR`, e a Sofia pediu que o https fosse validado *no schema Zod* ([09:23]). A matriz agora documenta que o código vai em `details[].message`. Na mesma revisão apareceu que `NotFoundError` fixa o código `NOT_FOUND`, então os 404 do módulo estendem `AppError` diretamente.
-5. **Ambiguidade "5 tentativas".** Somando os intervalos citados (1m+5m+30m+2h+12h ≈ 14h36), a frase "quase 15 horas entre primeira falha e última tentativa" só fecha com *1 envio + 5 retentativas*. Em vez de escolher em silêncio, adotei essa leitura e registrei a confirmação como **RFC-QA-06**.
-6. **Armadilha do `customer_id`.** O Marcos diz "customer_id implícito do JWT" ([09:31]), mas logo depois a Larissa corrige: vai no body ou no path ([09:32]). Os documentos seguem a correção, e a escolha entre body e path, que ninguém fez, virou a questão em aberto RFC-QA-05.
-7. **Validador automático.** Ele apontou `src/worker.ts` citado no RFC sem a marcação `(novo)`, o que contrariaria o critério "nenhum arquivo mencionado é inexistente". Todas as menções a arquivos ainda não criados agora levam `(novo)`.
-8. **Convenção de nome de ADR.** `docs/adrs/README.md` sugeria `0001-titulo.md`, e o enunciado exige `ADR-NNN-titulo.md`. Segui o enunciado e atualizei o README da pasta como índice.
+1. **Atribuições inventadas no PRD.** Os cenários de uso citavam clientes pelo nome ("a Nova Cargo fica 2h fora do ar", "a MaxDistribuição vaza a secret"). A transcrição só diz "já tinha cliente nosso" com esses problemas ([09:16] e [09:22] Diego), sem nomear ninguém. Troquei por "um cliente".
+2. **Números sem origem no FDD.** A primeira versão trazia um truncamento de `responseBody` em 2KB e um lote padrão de 20 eventos como se fossem fatos. Nenhum dos dois tinha "Localização" na transcrição. O truncamento foi removido e virou ponto de atenção no risco FDD-RSK-07. O lote ficou como "padrão sugerido, a validar", ancorado no "batch pequeno" de [09:08] Diego.
+3. **Caminho de arquivo inexistente.** O validador acusou `src/worker.ts` citado no RFC e no FDD sem a marcação `(novo)`, o que violaria o critério "nenhum arquivo mencionado é inexistente". Todas as menções a arquivos que ainda serão criados passaram a levar `(novo)`.
+4. **Formato do ADR.** Os ADRs começaram com o Status como item de uma lista de metadados. Para atender ao critério de ter a *seção* Status, converti para um `## Status` em todos.
+5. **Questão em aberto descoberta no meio do caminho.** Ao escrever o FDD, percebi que só existe o endpoint de replay da DLQ, sem listagem para o ADMIN descobrir o `:id`. Acrescentei **RFC-QA-10** em vez de inventar um endpoint.
+6. **Convenção de nome de ADR.** `docs/adrs/README.md` sugeria `0001-titulo.md`, e o enunciado exige `ADR-NNN-titulo.md`. Segui o enunciado e transformei o README da pasta em índice.
+
+Dois pontos da transcrição foram tratados desde a primeira versão, sem retrabalho, mas valem registro porque são onde a IA mais poderia errar: o `customer_id` (o Marcos diz que vem do JWT em [09:31] e a Larissa corrige em [09:32]; a escolha entre body e path ficou como **RFC-QA-05**) e a conta das "5 tentativas" (os 5 intervalos somam ~14h36, o que só fecha com "quase 15 horas" se for 1 envio + 5 retentativas; ficou como **RFC-QA-06**).
 
 ## Como navegar a entrega
 
