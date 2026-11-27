@@ -2,7 +2,7 @@
 
 Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcrição da reunião (`TRANSCRICAO.md`, no formato `[hh:mm] Falante`) ou o código-fonte (caminho do arquivo). Os IDs com numeração dos documentos (ex.: `PRD-FR-01`, `FDD-ERR-03`) aparecem nos próprios documentos. Os demais (ex.: `FDD-MODEL-*`, `RFC-CTX-*`, `FDD-DEP-*`, `PRD-TST-*`) são rótulos do tracker para itens do documento indicado. Linhas com sufixo (`b`, `c`, `-D2`…) desdobram um item com mais de uma origem.
 
-**Totais:** 267 linhas · 228 com Fonte = TRANSCRICAO (85%) · 39 com Fonte = CODIGO.
+**Totais:** 272 linhas · 232 com Fonte = TRANSCRICAO (85%) · 40 com Fonte = CODIGO.
 
 **Itens derivados:** 21 linhas têm Tipo marcado como "(derivado)" ou "Proposta". Nelas, a Localização aponta a fala ou o arquivo **mais próximo** que motivou o item; o item em si é uma dedução ou proposta do documento, não uma decisão da reunião. Os valores sem origem direta estão listados no FDD §8.1.
 
@@ -114,7 +114,7 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-FLX-05 | `docs/FDD.md` | Fluxo | Replay recoloca na outbox como pendente; ADMIN; auditado | TRANSCRICAO | [09:36] Larissa |
 | FDD-FLX-06 | `docs/FDD.md` | Fluxo (derivado) | Rotação de secret com grace period de 24h | TRANSCRICAO | [09:21] Sofia |
 | FDD-CONTRATO-01 | `docs/FDD.md` | Contrato | POST /webhooks: url, events; secret gerada e devolvida | TRANSCRICAO | [09:31] Marcos |
-| FDD-CONTRATO-02 | `docs/FDD.md` | Contrato | GET /webhooks de um customer | TRANSCRICAO | [09:33] Bruno |
+| FDD-CONTRATO-02 | `docs/FDD.md` | Contrato | GET /customers/:customerId/webhooks (listar webhooks de um customer) | TRANSCRICAO | [09:33] Bruno |
 | FDD-CONTRATO-03 | `docs/FDD.md` | Contrato | PATCH /webhooks/:id | TRANSCRICAO | [09:33] Bruno |
 | FDD-CONTRATO-04 | `docs/FDD.md` | Contrato | DELETE /webhooks/:id | TRANSCRICAO | [09:33] Bruno |
 | FDD-CONTRATO-05 | `docs/FDD.md` | Contrato (derivado) | POST /webhooks/:id/rotate-secret | TRANSCRICAO | [09:21] Sofia |
@@ -175,7 +175,7 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-INT-12 | `docs/FDD.md` | Integração | Scripts worker/worker:dev; engines node >= 20 (fetch nativo) | CODIGO | `package.json` |
 | FDD-INT-13 | `docs/FDD.md` | Integração | beforeEach limpa tabelas de webhook antes de customer | CODIGO | `tests/setup.ts` |
 | FDD-INT-13b | `docs/FDD.md` | Integração | Factory createTestWebhook | CODIGO | `tests/helpers/factories.ts` |
-| FDD-INT-14 | `docs/FDD.md` | Integração | customerId em query segue listOrdersQuerySchema | CODIGO | `src/modules/orders/order.schemas.ts` |
+| FDD-INT-14 | `docs/FDD.md` | Integração | customerId no path validado como UUID (padrão orderIdParamSchema); page/pageSize como listOrdersQuerySchema | CODIGO | `src/modules/orders/order.schemas.ts` |
 | FDD-RSK-01 | `docs/FDD.md` | Risco | Transação de changeStatus mais pesada | TRANSCRICAO | [09:04] Bruno |
 | FDD-RSK-02 | `docs/FDD.md` | Risco | Bug no publish bloqueia mudanças de status (rollback) | TRANSCRICAO | [09:40] Bruno |
 | FDD-RSK-03 | `docs/FDD.md` | Risco | Worker parado acumula eventos | TRANSCRICAO | [09:11] Diego |
@@ -275,3 +275,8 @@ Mapa de cada item registrado em PRD, RFC, FDD e ADRs até sua origem: a transcri
 | FDD-AC-13 | `docs/FDD.md` | Critério de aceite (derivado) | Endpoint lento não atrasa a entrega de outro endpoint | TRANSCRICAO | [09:04] Bruno |
 | FDD-AUTH-01 | `docs/FDD.md` | Restrição | Resto do CRUD liberado a qualquer role autenticada, por enquanto | TRANSCRICAO | [09:37] Sofia |
 | FDD-PROP-01 | `docs/FDD.md` | Proposta (derivado) | Tabela do §8.1: valores sugeridos sem origem direta (lote 20, sha256=, 202/409/422 etc.) | TRANSCRICAO | [09:08] Diego |
+| RFC-QA-06b | `docs/RFC.md` | Questão em aberto | Resumo final fala em "total 5 tentativas", em conflito com os 5 intervalos | TRANSCRICAO | [09:48] Larissa |
+| ADR-003-D6 | `docs/adrs/ADR-003-retry-backoff-exponencial-e-dlq.md` | Trade-off | Leitura de 6 requisições adotada apesar de "total 5 tentativas" | TRANSCRICAO | [09:48] Larissa |
+| PRD-FR-09b | `docs/PRD.md` | Requisito Funcional | Número de envios do retry pendente de RFC-QA-06 | TRANSCRICAO | [09:48] Larissa |
+| FDD-INT-14b | `docs/FDD.md` | Restrição | customerId no body (POST) ou no path (GET), nunca do JWT | TRANSCRICAO | [09:32] Larissa |
+| FDD-INT-07c | `docs/FDD.md` | Integração | Router /customers/:customerId/webhooks com mergeParams, registrado antes de /customers | CODIGO | `src/routes/index.ts` |

@@ -207,7 +207,7 @@ Executado por `src/modules/webhooks/webhook.processor.ts` (novo), disparado por 
 | Retentativa 4 | 5 | +12 h |
 | Retentativa 5 | 6 | → DLQ (§5.4) |
 
-Fonte: [09:17] Diego e [09:17] Larissa ("5 tentativas"; "total 5 tentativas" em [09:48] Larissa). A leitura **"envio inicial + 5 retentativas"** vem da soma dos intervalos, ~14h36min ("quase 15 horas"), e está **pendente de confirmação** em RFC-QA-06. Se a confirmação for "5 envios no total", basta tirar a última linha da tabela, ou seja, trocar a constante `MAX_ATTEMPTS` de 6 para 5.
+Fonte: [09:17] Diego e [09:17] Larissa. A transcrição é ambígua aqui: o resumo final fala em "**total** 5 tentativas" ([09:48] Larissa), mas os 5 intervalos citados somam ~14h36min ("quase 15 horas entre primeira falha e última tentativa", [09:17] Diego), o que só fecha com envio inicial + 5 retentativas. Este FDD adota a segunda leitura, pendente de confirmação em RFC-QA-06. Se a confirmação for "5 envios no total", basta tirar a última linha da tabela, ou seja, trocar a constante `MAX_ATTEMPTS` de 6 para 5.
 
 Progressão: backoff exponencial com intervalos fixos. Implementação: `const BACKOFF_SCHEDULE_MS = [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000]`. Na falha, `status = FAILED`, `lastError = <código>`, `nextAttemptAt = now() + BACKOFF_SCHEDULE_MS[attempts - 1]`.
 
@@ -244,7 +244,7 @@ Geração da secret: `crypto.randomBytes(32).toString('hex')`, com `node:crypto`
 
 Todas as rotas ficam sob `/api/v1` (`src/routes/index.ts`), exigem `Authorization: Bearer <jwt>` (`authenticate`) e usam o envelope de erro padrão `{ "error": { "code", "message", "details?" } }` (`src/middlewares/error.middleware.ts`). O CRUD aceita **qualquer role autenticada** ([09:37] Sofia). O replay exige **ADMIN** ([09:36] Larissa).
 
-O `customerId` **não** vem do JWT ([09:32] Larissa). Por isso vai no body do `POST` e na query do `GET` de listagem, seguindo `listOrdersQuerySchema` em `src/modules/orders/order.schemas.ts`. Isso ainda está pendente de confirmação em RFC-QA-05.
+O `customerId` **não** vem do JWT e é "passado no body ou no path" ([09:32] Larissa). Por isso vai no **body** do `POST` (criação) e no **path** do `GET` de listagem (`/customers/:customerId/webhooks`), já que um `GET` não tem body. A validação do parâmetro segue `orderIdParamSchema` (`z.string().uuid()`) em `src/modules/orders/order.schemas.ts`. A escolha exata de body/path por rota ainda está pendente de confirmação em RFC-QA-05.
 
 ### 6.1 [FDD-CONTRATO-01] `POST /api/v1/webhooks`: cadastrar webhook ([09:31] Marcos)
 
@@ -298,9 +298,14 @@ export const createWebhookSchema = z.object({
 });
 ```
 
-### 6.2 [FDD-CONTRATO-02] `GET /api/v1/webhooks?customerId=…`: listar webhooks de um customer ([09:33] Bruno)
+### 6.2 [FDD-CONTRATO-02] `GET /api/v1/customers/:customerId/webhooks`: listar webhooks de um customer ([09:33] Bruno, [09:32] Larissa)
 
-**Request:** `GET /api/v1/webhooks?customerId=6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90&page=1&pageSize=20`
+**Request**
+```http
+GET /api/v1/customers/6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90/webhooks?page=1&pageSize=20
+Authorization: Bearer eyJhbGciOi...
+```
+`page` e `pageSize` seguem os limites de `listOrdersQuerySchema` (`pageSize` de 1 a 100, padrão 20).
 
 **Response 200**, com paginação de `src/shared/http/response.ts`:
 ```json
@@ -323,18 +328,35 @@ export const createWebhookSchema = z.object({
 | Status | Quando |
 |---|---|
 | 200 | Lista, possivelmente vazia |
-| 400 | `customerId` ausente ou que não é UUID |
+| 400 | `customerId` do path que não é UUID, ou `page`/`pageSize` inválidos |
 | 401 | Não autenticado |
+| 404 | `WEBHOOK_CUSTOMER_NOT_FOUND` |
 
 ### 6.3 [FDD-CONTRATO-03] `PATCH /api/v1/webhooks/:id`: editar ([09:33] Bruno)
 
 **Request**
-```json
+```http
+PATCH /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f
+Authorization: Bearer eyJhbGciOi...
+Content-Type: application/json
+
 { "events": ["PAID", "SHIPPED", "DELIVERED"], "active": true }
 ```
 Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1)`), `active`. `customerId` e `secret` **não** são editáveis por aqui.
 
-**Response 200:** mesmo formato de item do §6.2.
+**Response 200** (mesmo formato de item do §6.2, sem `secret`)
+```json
+{
+  "id": "0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f",
+  "customerId": "6f1c2a9e-3b7d-4c1a-9a51-0d2f6a7b8c90",
+  "url": "https://hooks.atlascomercial.com.br/oms/orders",
+  "events": ["PAID", "SHIPPED", "DELIVERED"],
+  "active": true,
+  "secretRotationExpiresAt": null,
+  "createdAt": "2026-11-26T12:00:00.000Z",
+  "updatedAt": "2026-11-26T14:10:00.000Z"
+}
+```
 
 | Status | Quando |
 |---|---|
@@ -344,7 +366,16 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 
 ### 6.4 [FDD-CONTRATO-04] `DELETE /api/v1/webhooks/:id`: remover ([09:33] Bruno)
 
-**Request:** `DELETE /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f`  **Response 204:** sem corpo.
+**Request**
+```http
+DELETE /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f
+Authorization: Bearer eyJhbGciOi...
+```
+
+**Response 204:** sem corpo. **Response 404:**
+```json
+{ "error": { "code": "WEBHOOK_NOT_FOUND", "message": "Webhook not found" } }
+```
 
 | Status | Quando |
 |---|---|
@@ -353,7 +384,11 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 
 ### 6.5 [FDD-CONTRATO-05] `POST /api/v1/webhooks/:id/rotate-secret`: rotacionar secret ([09:21] Sofia)
 
-**Request:** sem corpo.
+**Request** (sem corpo)
+```http
+POST /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f/rotate-secret
+Authorization: Bearer eyJhbGciOi...
+```
 
 **Response 200**
 ```json
@@ -371,7 +406,12 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 
 ### 6.6 [FDD-CONTRATO-06] `GET /api/v1/webhooks/:id/deliveries`: histórico de entregas ([09:34] Marcos)
 
-**Request:** `GET /api/v1/webhooks/0b7e9c3d-.../deliveries?limit=100` (`limit` de 1 a 100, padrão 100, ordenado por `createdAt DESC`). O número 100 vem de um exemplo do Marcos ("tipo, os últimos 100", [09:34]) e é proposta de implementação (§8.1).
+**Request**
+```http
+GET /api/v1/webhooks/0b7e9c3d-1f2a-4e5b-8c6d-7a8b9c0d1e2f/deliveries?limit=100
+Authorization: Bearer eyJhbGciOi...
+```
+`limit` vai de 1 a 100 (padrão 100), com ordenação por `createdAt DESC`. O número 100 vem de um exemplo do Marcos ("tipo, os últimos 100", [09:34]) e é proposta de implementação (§8.1).
 
 **Response 200**
 ```json
@@ -413,7 +453,11 @@ Campos aceitos (todos opcionais, pelo menos um): `url` (https), `events` (`min(1
 
 Middlewares: `authenticate`, `requireRole('ADMIN')` e `validate({ params })`.
 
-**Request:** sem corpo.
+**Request** (sem corpo; o JWT precisa ser de um usuário `ADMIN`)
+```http
+POST /api/v1/admin/webhooks/dead-letter/c3d4e5f6-0000-4000-8000-00000000abcd/replay
+Authorization: Bearer eyJhbGciOi...
+```
 
 **Response 202**
 ```json
@@ -599,7 +643,7 @@ Sem biblioteca de tracing. A **correlação** é feita por:
 | FDD-INT-04 | `src/middlewares/error.middleware.ts` | **Sem alteração.** Os erros `WEBHOOK_*` são `AppError` e saem como `{ error: { code, message, details } }`. `ZodError` e `P2002`/`P2025` do Prisma já estão cobertos ([09:29] Bruno). |
 | FDD-INT-05 | `src/middlewares/auth.middleware.ts` | O router de webhooks usa `router.use(authenticate)`, como `order.routes.ts`. O router admin acrescenta `requireRole('ADMIN')`, como `src/modules/users/user.routes.ts` ([09:36] Larissa). `req.user.id` alimenta `replayedById`. |
 | FDD-INT-06 | `src/middlewares/validate.middleware.ts` | Os schemas de `webhook.schemas.ts` são aplicados com `validate({ body, params, query })`. Atenção: o middleware converte qualquer `ZodError` em `VALIDATION_ERROR` (ver FDD-ERR-02). |
-| FDD-INT-07 | `src/routes/index.ts` e `src/app.ts` | Em `Controllers`, acrescentar `webhooks` e `webhooksAdmin`. Em `buildApiRouter`: `router.use('/webhooks', buildWebhookRouter(...))` e `router.use('/admin/webhooks', buildWebhookAdminRouter(...))`. Em `buildControllers`: instanciar `WebhookRepository` → `WebhookService` → `WebhookController`. |
+| FDD-INT-07 | `src/routes/index.ts` e `src/app.ts` | Em `Controllers`, acrescentar `webhooks` e `webhooksAdmin`. Em `buildApiRouter`: `router.use('/webhooks', buildWebhookRouter(...))`, `router.use('/admin/webhooks', buildWebhookAdminRouter(...))` e `router.use('/customers/:customerId/webhooks', buildCustomerWebhookRouter(...))` (este com `Router({ mergeParams: true })`, registrado **antes** de `/customers` para não passar pelo router de customers). Em `buildControllers`: instanciar `WebhookRepository` → `WebhookService` → `WebhookController`. |
 | FDD-INT-08 | `src/server.ts` e `src/config/database.ts` | `src/worker.ts` (novo) segue a estrutura do `bootstrap()` de `src/server.ts` (log de start, handlers de `SIGINT`/`SIGTERM`, `$disconnect`), mas **não** sobe o Express. Cria um `PrismaClient` próprio com `createPrismaClient()` ([09:30] Bruno). |
 | FDD-INT-09 | `src/config/env.ts` | Acrescentar as chaves `WEBHOOK_*` opcionais (§8) ao `envSchema`. `DATABASE_URL` é a mesma ([09:30] Bruno). |
 | FDD-INT-10 | `src/shared/logger/index.ts` | Reuso do `logger` nos dois processos. Acrescentar caminhos de secret a `redactPaths` (§9.1). |
